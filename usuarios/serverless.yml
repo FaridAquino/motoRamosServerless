@@ -1,0 +1,47 @@
+org: faridaquino
+service: api-usuarios-motoRamos
+
+provider:
+  name: aws
+  runtime: python3.12
+  timeout: 29
+  region: us-east-1
+  stage: dev
+  
+  iam:
+    role: arn:aws:iam::738683684819:role/LabRole
+
+  environment:
+    motosTable: motos
+    conductoresTable: conductores
+    usuariosTable: usuarios
+    serviciosRequeridosTable: servicios_requeridos
+    serviciosCompletosTable: servicios_completos
+    ubicacionesMotosTable: ubicaciones_motos
+
+package:
+  patterns:
+    - '!node_modules/**'       # Ignorar carpeta de node
+    - '!.serverless/**'        # Ignorar carpeta oculta de despliegue
+    - '!venv/**'               # Ignorar entorno virtual (si tienes uno)
+    - '!__pycache__/**'        # Ignorar archivos compilados de python
+    - '!package-lock.json'
+    - ./** # Incluir todo lo demás (tu código + librerías instaladas)
+  
+functions:
+  RegisterUsuario:
+    handler: handler.registerUsuario
+    events:
+      - http:
+          path: /registerUsuario
+          method: post
+          cors: true
+  
+  LoginUsuario:
+    handler: handler.loginUsuario
+    events:
+      - http:
+          path: /loginUsuario
+          method: post
+          cors: true
+

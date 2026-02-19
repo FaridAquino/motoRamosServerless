@@ -1,0 +1,150 @@
+org: faridaquino
+service: serviciosNecesarios
+
+provider:
+  name: aws
+  runtime: python3.12
+  timeout: 29
+  region: us-east-1
+  stage: dev
+  
+  iam:
+    role: arn:aws:iam::738683684819:role/LabRole
+
+package:
+  patterns:
+    - '!node_modules/**'       # Ignorar carpeta de node
+    - '!.serverless/**'        # Ignorar carpeta oculta de despliegue
+    - '!venv/**'               # Ignorar entorno virtual (si tienes uno)
+    - '!__pycache__/**'        # Ignorar archivos compilados de python
+    - '!package-lock.json'
+    - ./** # Incluir todo lo demás (tu código + librerías instaladas)
+
+custom:
+  motosTable: motos
+  conductoresTable: conductores
+  usuariosTable: usuarios
+  serviciosTable: servicios
+  ubicacionesMotosTable: ubicaciones_motos
+
+resources:
+  Resources:
+    MotosTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.motosTable}
+        BillingMode: PAY_PER_REQUEST
+        
+        AttributeDefinitions:
+          - AttributeName: motoId
+            AttributeType: S
+
+          - AttributeName: estado
+            AttributeType: S
+
+        KeySchema:
+          - AttributeName: motoId
+            KeyType: HASH
+
+        GlobalSecondaryIndexes:
+          - IndexName: EstadoIndex
+            KeySchema:
+              - AttributeName: estado
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        
+
+    ConductoresTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.conductoresTable}
+        BillingMode: PAY_PER_REQUEST
+    
+        AttributeDefinitions:
+          - AttributeName: driverId
+            AttributeType: S
+
+          - AttributeName: correo
+            AttributeType: S
+          
+        KeySchema:
+          - AttributeName: driverId
+            KeyType: HASH
+
+        GlobalSecondaryIndexes:
+          - IndexName: CorreoIndex
+            KeySchema:
+              - AttributeName: correo
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL    
+        
+    UsuariosTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.usuariosTable}
+        BillingMode: PAY_PER_REQUEST
+    
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: correo
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+        
+        GlobalSecondaryIndexes:
+          - IndexName: CorreoIndex
+            KeySchema:
+              - AttributeName: correo
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+    ServiciosTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.serviciosTable}
+        BillingMode: PAY_PER_REQUEST
+
+        AttributeDefinitions:
+          - AttributeName: serviceId
+            AttributeType: S
+          
+          - AttributeName: estado
+            AttributeType: S
+
+        KeySchema:
+          - AttributeName: serviceId
+            KeyType: HASH
+        
+        GlobalSecondaryIndexes:
+          - IndexName: EstadoIndex
+            KeySchema:
+              - AttributeName: estado
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        
+
+    UbicacionesMotosTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.ubicacionesMotosTable}
+        BillingMode: PAY_PER_REQUEST
+
+        AttributeDefinitions:
+          - AttributeName: placa
+            AttributeType: S
+          - AttributeName: timestamp
+            AttributeType: S
+        KeySchema:
+          - AttributeName: placa
+            KeyType: HASH
+          - AttributeName: timestamp
+            KeyType: RANGE
+    
+        
+

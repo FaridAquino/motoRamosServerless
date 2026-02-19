@@ -1,0 +1,70 @@
+org: faridaquino
+service: api-conductores-motoRamos
+
+provider:
+  name: aws
+  runtime: python3.12
+  timeout: 29
+  region: us-east-1
+  stage: dev
+  
+  iam:
+    role: arn:aws:iam::738683684819:role/LabRole
+
+  environment:
+    motosTable: motos
+    conductoresTable: conductores
+    usuariosTable: usuarios
+    serviciosRequeridosTable: servicios_requeridos
+    serviciosCompletosTable: servicios_completos
+    ubicacionesMotosTable: ubicaciones_motos
+
+package:
+  patterns:
+    - '!node_modules/**'       # Ignorar carpeta de node
+    - '!.serverless/**'        # Ignorar carpeta oculta de despliegue
+    - '!venv/**'               # Ignorar entorno virtual (si tienes uno)
+    - '!__pycache__/**'        # Ignorar archivos compilados de python
+    - '!package-lock.json'
+    - ./** # Incluir todo lo demás (tu código + librerías instaladas)
+  
+functions:
+  RegisterConductor:
+    handler: handler.registerConductor
+    events:
+      - http:
+          path: /registerConductor
+          method: post
+          cors: true
+  
+  LoginConductor:
+    handler: handler.loginConductor
+    events:
+      - http:
+          path: /loginConductor
+          method: post
+          cors: true
+  
+  RegistrarMoto:
+    handler: handler.registrarMoto
+    events:
+      - http:
+          path: /registrarMoto
+          method: post
+          cors: true
+  
+  RecorridoIniciado:
+    handler: handler.recorridoIniciado
+    events:
+      - http:
+          path: /recorridoIniciado
+          method: post
+          cors: true
+
+  RecorridoTerminado:
+    handler: handler.recorridoTerminado
+    events:
+      - http:
+          path: /recorridoTerminado
+          method: post
+          cors: true

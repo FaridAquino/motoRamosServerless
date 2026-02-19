@@ -1,0 +1,122 @@
+org: faridaquino
+service: websocket-motoRamos
+
+provider:
+  name: aws
+  runtime: python3.12
+  timeout: 29
+  region: us-east-1
+  stage: dev
+  
+  iam:
+    role: arn:aws:iam::738683684819:role/LabRole
+
+  websocketsApiName: websocket-motoRamos-${self:provider.stage}
+  websocketsApiRouteSelectionExpression: $request.body.action
+
+  environment:
+    connectionsTable: ${self:custom.connectionsTable}
+    motosTable: motos
+    conductoresTable: conductores
+    usuariosTable: usuarios
+    serviciosTable: servicios
+    ubicacionesMotosTable: ubicaciones_motos
+
+package:
+  patterns:
+    - '!node_modules/**'       # Ignorar carpeta de node
+    - '!.serverless/**'        # Ignorar carpeta oculta de despliegue
+    - '!venv/**'               # Ignorar entorno virtual (si tienes uno)
+    - '!__pycache__/**'        # Ignorar archivos compilados de python
+    - '!package-lock.json'
+    - ./** # Incluir todo lo demás (tu código + librerías instaladas)
+
+
+custom:
+  connectionsTable: connections
+  
+functions:
+  ConnectionHandler:
+    handler: handler.connectionHandler 
+    events:
+      - websocket:
+          route: $connect
+      - websocket:
+          route: $disconnect
+
+  DefaultHandler:
+    handler: handler.defaultHandler
+    events:
+      - websocket: $default
+  
+  RegistrarUbicacionMoto:
+    handler: handler.registrarUbicacionMoto
+    events:
+      - websocket:
+          route: registrarUbicacionMoto
+  
+  RegistrarServicioRequerido:
+    handler: handler.registrarServicio
+    events:
+      - websocket:
+          route: registrarServicio
+  
+  AceptarServicio:
+    handler: handler.aceptarServicio
+    events:
+      - websocket:
+          route: aceptarServicio
+
+  CompletarServicio:
+    handler: handler.completarServicio
+    events:
+      - websocket:
+          route: completarServicio
+  
+  Informar:
+    handler: handler.informar
+    events:
+      - websocket:
+          route: informar
+  
+  Transmitir:
+    handler: handler.transmitir
+    events:
+      - websocket:
+          route: transmitir
+
+resources:
+  Resources:
+    ConnectionsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.connectionsTable}
+        BillingMode: PAY_PER_REQUEST
+
+        AttributeDefinitions:
+          - AttributeName: connectionId
+            AttributeType: S
+          - AttributeName: rol
+            AttributeType: S
+          - AttributeName: userId
+            AttributeType: S
+
+        KeySchema:
+          - AttributeName: connectionId
+            KeyType: HASH
+        
+        GlobalSecondaryIndexes:
+          - IndexName: RolIndex
+            KeySchema:
+              - AttributeName: rol
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+              
+          - IndexName: UserIdIndex
+            KeySchema:
+              - AttributeName: userId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+        
