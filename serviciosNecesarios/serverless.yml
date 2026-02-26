@@ -41,6 +41,9 @@ resources:
 
           - AttributeName: estado
             AttributeType: S
+          
+          - AttributeName: placa
+            AttributeType: S
 
         KeySchema:
           - AttributeName: motoId
@@ -53,8 +56,14 @@ resources:
                 KeyType: HASH
             Projection:
               ProjectionType: ALL
+          
+          - IndexName: PlacaIndex
+            KeySchema:
+              - AttributeName: placa
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
         
-
     ConductoresTable:
       Type: AWS::DynamoDB::Table
       Properties:

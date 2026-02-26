@@ -3,7 +3,9 @@ import hmac
 import os
 import boto3
 import hashlib
+import uuid
 from decimal import Decimal
+from boto3.dynamodb.conditions import Key
 
 MOTOS_TABLE= os.environ["motosTable"]
 CONDUCTORES_TABLE= os.environ["conductoresTable"]
@@ -39,8 +41,9 @@ def registerConductor(event, context):
         conductores_Table = boto3.resource('dynamodb').Table(CONDUCTORES_TABLE)
         
         conductor_Json = {
-            'tenant_id': nombre,
-            'uuid': correo,
+            'driverId': str(uuid.uuid4()),
+            'correo': correo,
+            'nombre': nombre,
             'edad': Decimal(str(edad)),
             'contrasenaHasheada': contrasena_hash
         }
@@ -65,14 +68,15 @@ def loginConductor(event, context):
 
         body = json.loads(event['body'])
 
-        nombre = body['nombre']
         correo = body['correo']
         contrasena = body["contrasena"]
 
-
         conductores_Table = boto3.resource('dynamodb').Table(CONDUCTORES_TABLE)
         
-        response = conductores_Table.get_item(Key={'tenant_id': nombre, 'uuid': correo})
+        response = conductores_Table.query(
+            IndexName='CorreoIndex',
+            KeyConditionExpression=Key('correo').eq(correo)
+        )
         
         if 'Item' not in response:
             return {
@@ -128,27 +132,44 @@ def registrarMoto(event, context):
 
         body = json.loads(event['body'])
 
-        tenant_id = body['tenant_id']
-        uuid_conductor = body['uuid_conductor']
+        driverId = body['driverId']
         placa = body['placa']
-        modelo = body['modelo']
         color = body['color']
+        empresa= body['empresa']
+        correo_Conductor = body['correoConductor']
 
         motos_Table = boto3.resource('dynamodb').Table(MOTOS_TABLE)
-        
+        conductores_table=boto3.resource('dynamodb').Table(CONDUCTORES_TABLE)
+
         moto_Json = {
-            'tenant_id': tenant_id,
-            'uuid_conductor': uuid_conductor,
+            'motoId': str(uuid.uuid4()),
+            'estado': 'NO_TRABAJANDO',
+            'correoConductor': correo_Conductor,
             'placa': placa,
-            'modelo': modelo,
+            'empresa': empresa,
             'color': color
         }
         
+        response_update = conductores_table.update_item(
+            Key={
+                'driverId': driverId
+            },
+            UpdateExpression="SET motos = list_append(if_not_exists(motos, :empty_list), :moto)",
+            ExpressionAttributeValues={
+                ':empty_list': [],
+                ':moto': [placa]
+            },
+            ReturnValues="UPDATED_NEW"
+        )
+        print("Moto agregada a conductor: ", response_update.get('Attributes'))
+        
         motos_Table.put_item(Item=moto_Json)
+
+        print("Moto registraad: ", moto_Json)
         
         return {
             'statusCode': 200,
-            'body': json.dumps({'message': 'Moto registrada exitosamente'})
+            'body': json.dumps({'message': 'Moto registrada exitosamente al conductor'})
         }
 
     except KeyError as e:
@@ -157,7 +178,6 @@ def registrarMoto(event, context):
         print(e)
         return {'statusCode': 500, 'body': json.dumps({'error': str(e)})}
 
-
 def recorridoIniciado(event, context):
     try:
         if 'body' not in event or event['body'] is None:
@@ -165,11 +185,10 @@ def recorridoIniciado(event, context):
 
         body = json.loads(event['body'])
 
-        nombre= body['nombre']
-        placa = body['placa']
+        moto_Id= body['motoId']
 
         motos_Table=boto3.resource('dynamodb').Table(MOTOS_TABLE)
-        response= motos_Table.get_item(Key={'tenant_id': nombre, 'placa': placa})
+        response= motos_Table.get_item(Key={'motoId': moto_Id})
 
         if 'Item' not in response:
             return {
@@ -179,8 +198,7 @@ def recorridoIniciado(event, context):
 
         update_response = motos_Table.update_item(
             Key={
-                'tenant_id': nombre, 
-                'placa': placa
+                'motoId': moto_Id
             },
             UpdateExpression="set estado = :e",
             ExpressionAttributeValues={
@@ -211,11 +229,10 @@ def recorridoTerminado(event,context):
 
         body = json.loads(event['body'])
 
-        nombre= body['nombre']
-        placa = body['placa']
+        moto_Id= body['motoId']
 
         motos_Table=boto3.resource('dynamodb').Table(MOTOS_TABLE)
-        response= motos_Table.get_item(Key={'tenant_id': nombre, 'placa': placa})
+        response= motos_Table.get_item(Key={'motoId': moto_Id})
 
         if 'Item' not in response:
             return {
@@ -225,8 +242,7 @@ def recorridoTerminado(event,context):
 
         update_response = motos_Table.update_item(
             Key={
-                'tenant_id': nombre, 
-                'placa': placa
+                'motoId': moto_Id
             },
             UpdateExpression="set estado = :e",
             ExpressionAttributeValues={

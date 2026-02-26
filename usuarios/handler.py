@@ -3,7 +3,9 @@ import hmac
 import os
 import boto3
 import hashlib
+import uuid
 from decimal import Decimal
+from boto3.dynamodb.conditions import Key
 
 USUARIOS_TABLE=os.environ['usuariosTable']
 
@@ -20,7 +22,6 @@ def registerUsuario(event, context):
         correo = body['correo']
         contrasena = body["contrasena"]
 
-        # Hashing de la contraseña
         salt = os.urandom(16)
         hash_bytes = hashlib.pbkdf2_hmac(
             'sha256', 
@@ -34,9 +35,10 @@ def registerUsuario(event, context):
         usuarios_Table = boto3.resource('dynamodb').Table(USUARIOS_TABLE)
         
         usuario_Json = {
-            'tenant_id': nombre,
+            'userId': str(uuid.uuid4()),
+            'nombre': nombre,
             'apellido': apellido,
-            'uuid': correo,
+            'correo': correo,
             'edad': Decimal(str(edad)),
             'contrasenaHasheada': contrasena_hash
         }
@@ -61,14 +63,15 @@ def loginUsuario(event, context):
 
         body = json.loads(event['body'])
 
-        nombre = body['nombre']
         correo = body['correo']
         contrasena = body["contrasena"]
 
-
         usuarios_Table = boto3.resource('dynamodb').Table(USUARIOS_TABLE)
         
-        response = usuarios_Table.get_item(Key={'tenant_id': nombre, 'uuid': correo})
+        response = usuarios_Table.query(
+            IndexName='CorreoIndex',
+            KeyConditionExpression=Key('correo').eq(correo)
+        )
         
         if 'Item' not in response:
             return {
