@@ -10,10 +10,8 @@ from boto3.dynamodb.conditions import Key
 MOTOS_TABLE= os.environ["motosTable"]
 CONDUCTORES_TABLE= os.environ["conductoresTable"]
 USUARIOS_TABLE= os.environ["usuariosTable"]
-SERVICIOS_REQUERIDOS_TABLE= os.environ["serviciosRequeridosTable"]
-SERVICIOS_COMPLETOS_TABLE= os.environ["serviciosCompletosTable"]
+SERVICIOS_TABLE= os.environ["serviciosTable"]
 UBICACIONES_MOTOS_TABLE= os.environ["ubicacionesMotosTable"]
-UBICACIONES_USUARIOS_TABLE= os.environ["ubicacionesUsuariosTable"]
 
 def registerConductor(event, context):
     try:

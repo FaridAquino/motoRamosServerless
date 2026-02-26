@@ -22,8 +22,7 @@ provider:
     motosTable: motos
     conductoresTable: conductores
     usuariosTable: usuarios
-    serviciosRequeridosTable: servicios_requeridos
-    serviciosCompletosTable: servicios_completos
+    serviciosTable: servicios
     ubicacionesMotosTable: ubicaciones_motos
 
 package:
