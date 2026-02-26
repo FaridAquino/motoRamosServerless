@@ -76,13 +76,17 @@ def loginConductor(event, context):
             KeyConditionExpression=Key('correo').eq(correo)
         )
         
-        if 'Item' not in response:
+        items = response.get('Items', [])
+        
+        if len(items) == 0:
             return {
                 'statusCode': 404,
                 'body': json.dumps({'error': 'Conductor no encontrado'})
             }
 
-        contrasena_guardada = response['Item']['contrasenaHasheada']
+        conductor_encontrado = items[0]
+
+        contrasena_guardada = conductor_encontrado['contrasenaHasheada']
         
         try:
             salt_hex, hash_real_hex = contrasena_guardada.split(":")
