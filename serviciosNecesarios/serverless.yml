@@ -9,7 +9,15 @@ provider:
   stage: dev
   
   iam:
-    role: arn:aws:iam::738683684819:role/LabRole
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:*
+            - lambda:*
+          Resource: 
+            - "arn:aws:dynamodb:*:092671055435:table/*"
+            - "arn:aws:lambda:*:092671055435:function:*"
 
 package:
   patterns:
@@ -18,7 +26,7 @@ package:
     - '!venv/**'               # Ignorar entorno virtual (si tienes uno)
     - '!__pycache__/**'        # Ignorar archivos compilados de python
     - '!package-lock.json'
-    - ./** # Incluir todo lo demás (tu código + librerías instaladas)
+    - ./**
 
 custom:
   motosTable: motos

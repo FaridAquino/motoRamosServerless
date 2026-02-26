@@ -9,7 +9,7 @@ provider:
   stage: dev
   
   iam:
-    role: arn:aws:iam::738683684819:role/LabRole
+    role: arn:aws:iam::092671055435:role/LabRole
 
   environment:
     motosTable: motos
