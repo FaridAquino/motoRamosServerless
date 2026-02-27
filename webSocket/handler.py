@@ -469,9 +469,10 @@ def aceptarServicio(event, context):
 
     try:
         motos_Table=boto3.resource('dynamodb').Table(MOTOS_TABLE)
+        print("MotoId recibido:", body["motoId"])
         moto_response= motos_Table.get_item(
             Key={
-                'motoId': body.get("motoId"),
+                'motoId': body["motoId"],
             }
         )
 
@@ -482,6 +483,7 @@ def aceptarServicio(event, context):
             }
         
         if moto_response['Item'].get('estado') == 'NO_TRABAJANDO':
+            print("La moto no está trabajando, no puede aceptar servicios")
             return {
                 'statusCode': 400,
                 'body': json.dumps({'error': 'La moto no está trabajando'})
@@ -494,12 +496,12 @@ def aceptarServicio(event, context):
             'body': json.dumps({'error': 'Error al acceder a la tabla de motos'})
         }
 
-    monto_Final= body.get("montoFinal")
+    monto_Final= body["montoFinal"]
 
     try:
         servicio_Table = boto3.resource('dynamodb').Table(SERVICIOS_TABLE)
         servicio_Table.update_item(
-            Key={'serviceId': body.get("serviceId")},
+            Key={'serviceId': body["serviceId"]},
             
             ConditionExpression="attribute_not_exists(placaMoto) AND estado = 'PENDIENTE'",
 
@@ -516,7 +518,7 @@ def aceptarServicio(event, context):
         print("Servicio ATENDIDO actualizado en DynamoDB")
 
         motos_Table.update_item(
-            Key={'motoId': body.get("motoId")},
+            Key={'motoId': body["motoId"]},
             UpdateExpression="SET estado = :e",
             ExpressionAttributeValues={
                 ':e': 'CONDUCIENDO'
