@@ -55,8 +55,8 @@ def transmitir(event, message_payload_dict):
         
         try:
             response = connections_Table.query(
-                IndexName='RolIndex',  # Usamos el índice que creaste en el YAML
-                KeyConditionExpression=Key('rol').eq('CONDUCTOR') # Solo traemos CONDUCTORES
+                IndexName='RolIndex',
+                KeyConditionExpression=Key('rol').eq('CONDUCTOR')
             )
             destinatarios = response.get('Items', [])
             print(f"Se encontraron {len(destinatarios)} conductores conectados.")
@@ -214,13 +214,13 @@ def connectionManager(event, context):
             
             item = {
                 'connectionId': connection_id,
-                'role': query_params.get('role', 'NULL'),
+                'rol': query_params.get('role', 'NULL'),
                 'userId': query_params.get('userId', 'NULL')
             }
 
             table.put_item(Item=item)
-
-            print(f"Conexión registrada: {connection_id} con rol {item['role']}")
+    
+            print(f"Conexión registrada: {connection_id} con rol {item['rol']}")
             
             return {'statusCode': 200, 'body': 'Conectado.'}
 
