@@ -44,7 +44,7 @@ custom:
   
 functions:
   ConnectionHandler:
-    handler: handler.connectionHandler 
+    handler: handler.connectionManager
     events:
       - websocket:
           route: $connect

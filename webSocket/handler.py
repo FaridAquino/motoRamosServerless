@@ -197,7 +197,7 @@ def transmitir(event, message_payload_dict):
     # 📡 LÓGICA WEBSOCKET (Tu código original sigue aquí)
     # ==============================================================================
 
-def connection_manager(event, context):
+def connectionManager(event, context):
     connection_id = event['requestContext']['connectionId']
     route_key = event['requestContext']['routeKey']
     
@@ -241,9 +241,9 @@ def connection_manager(event, context):
             print(f"Error en $disconnect (no crítico): {e}")
             return {'statusCode': 200, 'body': 'Desconectado con error de limpieza.'}
 
-    return {'statusCode': 500, 'body': 'Error en connection_manager.'}
+    return {'statusCode': 500, 'body': 'Error en connectionManager.'}
 
-def default_handler(event, context):
+def defaultHandler(event, context):
     print(f"Ruta $default invocada. Evento: {event}")
     return {
         'statusCode': 404,
