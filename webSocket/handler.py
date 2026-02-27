@@ -413,6 +413,7 @@ def registrarServicio(event, context):
     servicio_requerido = {
         'serviceId': str(uuid.uuid4()),
         'estado': estado,
+        'usuarioId': body["usuarioId"],
 
         'fechaPedida': fecha_actual_str,
         'horaPedida': hora_actual_str,
@@ -594,8 +595,9 @@ def completarServicio(event, context):
     
     transmission_payload = {
         'action': 'servicioCompletado',
-        'serviceId': body.get("serviceId"),
-        'correoMoto': body.get("correoMoto"),
+        'serviceId': body["serviceId"],
+        'correoMoto': body["correoMoto"],
+        'usuarioId': body["usuarioId"],
     }
     
     transmitir(event, transmission_payload)
