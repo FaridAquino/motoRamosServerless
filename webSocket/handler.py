@@ -517,7 +517,6 @@ def aceptarServicio(event, context):
         )
 
         print("Servicio ATENDIDO actualizado en DynamoDB")
-        print("Servicio ATENDIDO actualizado en DynamoDB")
 
         motos_Table.update_item(
             Key={'motoId': body["motoId"]},
@@ -539,7 +538,7 @@ def aceptarServicio(event, context):
     transmission_payload = {
         'action': 'servicioAceptado',
         'serviceId': body.get("serviceId"),
-        'usuarioId': body.get("usuarioId"),
+        'correoMoto': body.get("correoMoto"),
         'placaMoto': moto_response['Item'].get('placa'),
         'nombreMoto': moto_response['Item'].get('nombre'),
         'montoFinal': float(monto_Final)
@@ -565,7 +564,7 @@ def completarServicio(event, context):
     try:
         servicio_Table = boto3.resource('dynamodb').Table(SERVICIOS_TABLE)
         servicio_Table.update_item(
-            Key={'serviceId': body.get("serviceId")},
+            Key={'serviceId': body["serviceId"]},
             UpdateExpression="SET estado = :e, fechaCompletado = :fC, horaCompletado = :hC",
             ExpressionAttributeValues={
                 ':e': 'COMPLETADO',
@@ -578,7 +577,7 @@ def completarServicio(event, context):
         motos_Table=boto3.resource('dynamodb').Table(MOTOS_TABLE)
 
         motos_Table.update_item(
-            Key={'motoId': body.get("motoId")},
+            Key={'motoId': body["motoId"]},
             UpdateExpression="SET estado = :e",
             ExpressionAttributeValues={
                 ':e': 'TRABAJANDO'
@@ -596,7 +595,7 @@ def completarServicio(event, context):
     transmission_payload = {
         'action': 'servicioCompletado',
         'serviceId': body.get("serviceId"),
-        'usuarioId': body.get("usuarioId"),
+        'correoMoto': body.get("correoMoto"),
     }
     
     transmitir(event, transmission_payload)
