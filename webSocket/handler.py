@@ -356,13 +356,16 @@ def registrarServicio(event, context):
     body = json.loads(event['body'])
     
     try:
+        print("Obteniendo información del usuario desde DynamoDB...")
+        print(USUARIOS_TABLE)
+        
         usuario_Table = boto3.resource('dynamodb').Table(USUARIOS_TABLE)
         response = usuario_Table.get_item(
             Key={
-                'userId': body.get("usuarioId"),
+                'userId': body["usuarioId"],
             }
         )
-        
+
         if 'Item' not in response:
             return {
                 'statusCode': 404,
@@ -381,9 +384,9 @@ def registrarServicio(event, context):
     nombre_Usuario = response['Item'].get('nombre')
     correo_Usuario = response['Item'].get('correo')
 
-    cantidad = body.get("cantidad")
-    monto = body.get("monto")
-    nombreDestino = body.get("nombreDestino")
+    cantidad = body["cantidad"]
+    monto = body["monto"]
+    nombreDestino = body["nombreDestino"]
 
     try:
         lat_float_origen = float(body["latitudOrigen"])
