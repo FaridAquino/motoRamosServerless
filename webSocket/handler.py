@@ -214,7 +214,7 @@ def connectionManager(event, context):
             
             item = {
                 'connectionId': connection_id,
-                'rol': query_params.get('role', 'NULL'),
+                'rol': query_params.get('rol', 'NULL'),
                 'userId': query_params.get('userId', 'NULL')
             }
 
