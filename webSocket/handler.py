@@ -503,7 +503,7 @@ def aceptarServicio(event, context):
         servicio_Table.update_item(
             Key={'serviceId': body["serviceId"]},
             
-            ConditionExpression="attribute_not_exists(placaMoto) AND estado = 'PENDIENTE'",
+            ConditionExpression="attribute_not_exists(placaMoto) AND estado = :estadoPendiente",
 
             UpdateExpression="SET estado = :e, placaMoto = :pM, nombreMoto = :nM, montoFinal = :mF",
             
@@ -512,9 +512,11 @@ def aceptarServicio(event, context):
                 ':nM': moto_response['Item'].get('nombre'),
                 ':pM': moto_response['Item'].get('placa'),
                 ':mF': Decimal(str(float(monto_Final))),
-
+                ':estadoPendiente': 'PENDIENTE' 
             }
         )
+
+        print("Servicio ATENDIDO actualizado en DynamoDB")
         print("Servicio ATENDIDO actualizado en DynamoDB")
 
         motos_Table.update_item(
