@@ -107,7 +107,7 @@ def loginConductor(event, context):
         if hmac.compare_digest(hash_intento, hash_real_bytes):
             return {
                 'statusCode': 200,
-                'body': json.dumps({'message': 'Login exitoso'})
+                'body': json.dumps({'message': 'Login exitoso,', 'driverId': conductor_encontrado['driverId']})
             }
         else:
             return {

@@ -81,9 +81,9 @@ def loginUsuario(event, context):
                 'body': json.dumps({'error': 'Usuario no encontrado'})
             }
 
-        conductor_encontrado = items[0]
+        usuario_encontrado = items[0]
 
-        contrasena_guardada = conductor_encontrado['contrasenaHasheada']
+        contrasena_guardada = usuario_encontrado['contrasenaHasheada']
         
         try:
             salt_hex, hash_real_hex = contrasena_guardada.split(":")
@@ -104,7 +104,7 @@ def loginUsuario(event, context):
         if hmac.compare_digest(hash_intento, hash_real_bytes):
             return {
                 'statusCode': 200,
-                'body': json.dumps({'message': 'Login exitoso'})
+                'body': json.dumps({'message': 'Login exitoso', 'userId': usuario_encontrado['userId']})
             }
         else:
             return {
