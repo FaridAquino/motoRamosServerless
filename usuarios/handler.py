@@ -47,7 +47,7 @@ def registerUsuario(event, context):
         
         return {
             'statusCode': 200,
-            'body': json.dumps({'message': 'Usuario registrado exitosamente'})
+            'body': json.dumps({'message': 'Usuario registrado exitosamente', 'userId': usuario_Json['userId']})
         }
 
     except KeyError as e:
