@@ -79,6 +79,27 @@ def transmitir(event, message_payload_dict):
             print(f"Error consultando DynamoDB Index: {e}")
             return
 
+    elif action == 'solicitudServicio':
+
+        target_user_id = message_payload_dict.get('userId')
+        print("Acción detectada: Enviar solicitud de aceptar servicio a USUARIO")
+        try:
+            response = connections_Table.query(
+                IndexName='UserIdIndex',
+                KeyConditionExpression=Key('userId').eq(target_user_id)
+            )
+            destinatarios = response.get('Items', [])
+            if not destinatarios:
+                print(f"El usuario {target_user_id} no está conectado actualmente.")
+            
+            else:
+                print(f"Se encontró al usuario conectado con userId: {target_user_id}")
+
+            
+        except ClientError as e:
+            print(f"Error consultando DynamoDB Index: {e}")
+            return
+
     elif action == 'aceptarServicio':
         target_user_id = message_payload_dict.get('usuarioId') 
         
@@ -88,12 +109,15 @@ def transmitir(event, message_payload_dict):
                 # Usamos el NUEVO ÍNDICE para buscar la conexión de ese usuario
                 response = connections_Table.query(
                     IndexName='UserIdIndex',
-                    KeyConditionExpression=Key('userId').eq(target_user_id)
+                    KeyConditionExpression=Key('usuarioId').eq(target_user_id)
                 )
                 destinatarios = response.get('Items', [])
                 
                 if not destinatarios:
                     print(f"El usuario {target_user_id} no está conectado actualmente.")
+                else:
+                    print(f"Se encontró al usuario conectado con usuarioId: {target_user_id}")
+
             except ClientError as e:
                 print(f"Error query UserIdIndex: {e}")
         else:
@@ -108,7 +132,7 @@ def transmitir(event, message_payload_dict):
                 # Usamos el NUEVO ÍNDICE para buscar la conexión de ese usuario
                 response = connections_Table.query(
                     IndexName='UserIdIndex',
-                    KeyConditionExpression=Key('userId').eq(target_user_id)
+                    KeyConditionExpression=Key('usuarioId').eq(target_user_id)
                 )
                 destinatarios = response.get('Items', [])
                 
@@ -192,10 +216,6 @@ def transmitir(event, message_payload_dict):
     #         print(f"[Error SNS] Fallo al enviar notificación: {e}")
     # else:
     #     print("[SNS] Omitido: Faltan variables SNS_TOPIC_ARN o USERS_DEVICES_TABLE")
-
-    # ==============================================================================
-    # 📡 LÓGICA WEBSOCKET (Tu código original sigue aquí)
-    # ==============================================================================
 
 def connectionManager(event, context):
     connection_id = event['requestContext']['connectionId']
@@ -464,6 +484,27 @@ def registrarServicio(event, context):
 
     }
 
+def solicitudServicio(event, context):
+    print("Evento recibido en solicitudServicio")
+    body= json.loads(event['body'])
+    
+    transmission_payload = {    
+        'action': 'solicitudServicio',
+        'serviceId': body.get("serviceId"),
+        'userId': body.get("userId"),
+        'nombreMoto': body.get("nombreMoto"),
+        'placaMoto': body.get("placaMoto"),
+        'montoFinal': body.get("montoFinal")
+    }
+    
+    transmitir(event, transmission_payload)
+    print("Solicitud de servicio transmitida exitosamente")
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps({'message': 'Solicitud de servicio transmitida exitosamente'})
+    }
+
 def aceptarServicio(event, context):
     print("Evento recibido en aceptarServicio")
     body= json.loads(event['body'])
@@ -606,5 +647,4 @@ def completarServicio(event, context):
     return {
         'statusCode': 200,
         'body': json.dumps({'message': 'Servicio completado registrado exitosamente'})
-    }   
-
+    }

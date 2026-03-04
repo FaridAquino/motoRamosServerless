@@ -80,6 +80,12 @@ functions:
       - websocket:
           route: completarServicio
   
+  SolicitudServicio:
+    handler: handler.solicitudServicio
+    events:
+      - websocket:
+          route: solicitudServicio
+  
   Informar:
     handler: handler.informar
     events:
