@@ -9,7 +9,7 @@ Incluye reconexión robusta y operaciones DynamoDB atómicas para evitar duplici
 Flujo de un servicio:
   1. Pasajero envía 'servicioRequerido' → se crea servicio PENDIENTE
   2. Conductores activos reciben la notificación → mandan 'aceptarServicio'
-  3. Se asigna atómicamente al primer conductor → estado EN_CAMINO
+  3. Se transmite el servicio a todos los conductores en estado "TRABAJANDO" → estado EN_CAMINO
   4. Conductor actualiza ubicación con 'registrarUbicacionMoto'
   5. Conductor envía 'iniciarViaje' cuando recoge al pasajero → EN_CURSO
   6. Conductor envía 'completarViaje' al llegar a destino → COMPLETADO
@@ -109,7 +109,7 @@ def _broadcast_to_active_drivers(apigw, payload: dict, exclude_id: str = ''):
     tabla_conn = dynamodb.Table(CONEXIONES_TABLE)
 
     # Scan de conductores activos (para Tarma la cantidad es manejable)
-    result = tabla_cond.scan(
+    result = tabla_cond.scan( #poner activo como un GSI con tipo string.
         FilterExpression=Attr('activo').eq(True),
         ProjectionExpression='driverId',
     )
@@ -156,9 +156,27 @@ def _get_claims(event) -> dict | None:
         'sub': item.get('userId', ''),
         'rol': item.get('rol', ''),
         'nombre': item.get('nombre', ''),
-        'correo': item.get('correo', ''),
+        'telefono': item.get('telefono', ''),
     }
 
+
+def _coordenadas_a_decimal(ubicacion):
+    """
+    Convierte lat y lng de un diccionario a Decimal para DynamoDB.
+    Usa str() intermedio para evitar errores de precisión de punto flotante.
+    """
+    if not ubicacion:
+        return None
+        
+    # Hacemos una copia para no modificar el diccionario original por error
+    ubi_segura = ubicacion.copy()
+    
+    if 'lat' in ubi_segura:
+        ubi_segura['lat'] = Decimal(str(ubi_segura['lat']))
+    if 'lng' in ubi_segura:
+        ubi_segura['lng'] = Decimal(str(ubi_segura['lng']))
+        
+    return ubi_segura
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # $connect — Autenticación JWT al conectar al WebSocket
@@ -184,7 +202,7 @@ def connect(event, context):
         'userId': claims['sub'],
         'rol': claims.get('rol', ''),
         'nombre': claims.get('nombre', ''),
-        'correo': claims.get('correo', ''),
+        'telefono': claims.get('telefono', ''),
         'conectadoEn': datetime.now(ZONA_PERU).isoformat(),
         'ttl': int(time.time()) + 86400,  # Auto-expirar en 24h
     })
@@ -231,7 +249,7 @@ def servicio_requerido(event, context):
       "action": "servicioRequerido",
       "origen": {"lat": -11.4198, "lng": -75.6896, "direccion": "Plaza de Armas"},
       "destino": {"lat": -11.4150, "lng": -75.6820, "direccion": "Terminal Terrestre"},
-      "precioSugerido": 4.00,
+      "precioSugerido": 1.00,
       "comentario": "Tengo una maleta"
     }
     """
@@ -242,11 +260,15 @@ def servicio_requerido(event, context):
         return _ws_error('Solo usuarios pueden solicitar servicios', 403)
 
     body = _parse_body(event)
-    origen = body.get('origen')
-    destino = body.get('destino')
 
-    if not origen or not destino:
+    origen_crudo = body.get('origen')
+    destino_crudo = body.get('destino')
+
+    if not origen_crudo or not destino_crudo:
         return _ws_error('Se requiere origen y destino')
+
+    origen = _coordenadas_a_decimal(origen_crudo)
+    destino = _coordenadas_a_decimal(destino_crudo)
 
     ahora = datetime.now(ZONA_PERU).isoformat()
     service_id = str(uuid.uuid4())
