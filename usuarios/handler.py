@@ -40,31 +40,30 @@ def registerUsuario(event, context):
     if not body:
         return error('Falta el body de la solicitud')
 
-    required = ['nombre', 'apellido', 'correo', 'contrasena', 'telefono']
+    required = ['nombre', 'apellido','telefono', 'contrasena', 'telefono']
     missing = [f for f in required if f not in body or not body[f]]
     if missing:
         return error(f'Campos requeridos faltantes: {", ".join(missing)}')
 
     tabla = dynamodb.Table(USUARIOS_TABLE)
 
-    # Verificar correo duplicado
+    # Verificar teléfono duplicado
     dup = tabla.query(
-        IndexName='CorreoIndex',
-        KeyConditionExpression=Key('correo').eq(body['correo']),
+        IndexName='TelefonoIndex',
+        KeyConditionExpression=Key('telefono').eq(body['telefono']),
         Select='COUNT',
     )
     if dup['Count'] > 0:
-        return error('Ya existe un usuario registrado con ese correo', 409)
+        return error('Ya existe un usuario registrado con ese teléfono', 409)
 
     ahora = datetime.now(ZONA_PERU).isoformat()
     user_id = str(uuid.uuid4())
 
     item = {
         'userId': user_id,
+        'telefono': body['telefono'],
         'nombre': body['nombre'],
         'apellido': body['apellido'],
-        'correo': body['correo'],
-        'telefono': body['telefono'],
         'contrasenaHasheada': hash_password(body['contrasena']),
         'fotoUrl': '',
         'sumaCalificaciones': Decimal('0'),
@@ -72,14 +71,12 @@ def registerUsuario(event, context):
         'activo': True,
         'creadoEn': ahora,
     }
-    if 'edad' in body and body['edad'] is not None:
-        item['edad'] = Decimal(str(body['edad']))
 
     tabla.put_item(Item=item)
 
     token = generate_jwt({
         'sub': user_id,
-        'correo': body['correo'],
+        'telefono': body['telefono'],
         'rol': 'USUARIO',
         'nombre': body['nombre'],
     })
@@ -100,15 +97,15 @@ def loginUsuario(event, context):
     if not body:
         return error('Falta el body de la solicitud')
 
-    correo = body.get('correo')
+    telefono = body.get('telefono')
     contrasena = body.get('contrasena')
-    if not correo or not contrasena:
-        return error('Correo y contraseña son requeridos')
+    if not telefono or not contrasena:
+        return error('Teléfono y contraseña son requeridos')
 
     tabla = dynamodb.Table(USUARIOS_TABLE)
     result = tabla.query(
-        IndexName='CorreoIndex',
-        KeyConditionExpression=Key('correo').eq(correo),
+        IndexName='TelefonoIndex',
+        KeyConditionExpression=Key('telefono').eq(telefono),
     )
     items = result.get('Items', [])
     if not items:
@@ -123,7 +120,7 @@ def loginUsuario(event, context):
 
     token = generate_jwt({
         'sub': usuario['userId'],
-        'correo': correo,
+        'telefono': usuario.get('telefono'),
         'rol': 'USUARIO',
         'nombre': usuario.get('nombre', ''),
     })
@@ -175,7 +172,7 @@ def updatePerfilUsuario(event, context):
     if not body:
         return error('Falta el body')
 
-    allowed = ['nombre', 'apellido', 'telefono', 'edad']
+    allowed = ['nombre', 'apellido', 'telefono']
     expr_parts, values, names = [], {}, {}
 
     for campo in allowed:
@@ -184,8 +181,6 @@ def updatePerfilUsuario(event, context):
             placeholder = f':v_{campo}'
             expr_parts.append(f'{safe} = {placeholder}')
             val = body[campo]
-            if campo == 'edad':
-                val = Decimal(str(val))
             values[placeholder] = val
             names[safe] = campo
 

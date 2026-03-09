@@ -18,15 +18,15 @@ resources:
         AttributeDefinitions:
           - AttributeName: userId
             AttributeType: S
-          - AttributeName: correo
+          - AttributeName: telefono
             AttributeType: S
         KeySchema:
           - AttributeName: userId
             KeyType: HASH
         GlobalSecondaryIndexes:
-          - IndexName: CorreoIndex
+          - IndexName: TelefonoIndex
             KeySchema:
-              - AttributeName: correo
+              - AttributeName: telefono
                 KeyType: HASH
             Projection:
               ProjectionType: ALL
