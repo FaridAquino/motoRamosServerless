@@ -80,7 +80,6 @@ def transmitir(event, message_payload_dict):
             return
 
     elif action == 'solicitudServicio':
-
         target_user_id = message_payload_dict.get('userId')
         print("Acción detectada: Enviar solicitud de aceptar servicio a USUARIO")
         try:
@@ -484,17 +483,52 @@ def registrarServicio(event, context):
 
     }
 
+def cancelarServicio(event, context):
+    print("Evento recibido en cancelarServicio")
+    body= json.loads(event['body'])
+    
+    try:
+        servicio_Table = boto3.resource('dynamodb').Table(SERVICIOS_TABLE)
+        servicio_Table.update_item(
+            Key={'serviceId': body["serviceId"]},
+            UpdateExpression="SET estado = :e",
+            ExpressionAttributeValues={
+                ':e': 'CANCELADO'
+            }
+        )
+        print("Servicio cancelado actualizado en DynamoDB")
+    
+    except Exception as e:
+        print(f"Error al actualizar el servicio en DynamoDB: {e}")
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': 'Error al cancelar el servicio'})
+        }
+    
+    transmission_payload = {
+        'action': 'servicioCancelado',
+        'serviceId': body["serviceId"],
+    }
+    
+    transmitir(event, transmission_payload)
+    print("Servicio cancelado transmitido exitosamente")
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps({'message': 'Servicio cancelado registrado exitosamente'})
+    }
+
 def solicitudServicio(event, context):
     print("Evento recibido en solicitudServicio")
     body= json.loads(event['body'])
     
     transmission_payload = {    
         'action': 'solicitudServicio',
-        'serviceId': body.get("serviceId"),
-        'userId': body.get("userId"),
-        'nombreMoto': body.get("nombreMoto"),
-        'placaMoto': body.get("placaMoto"),
-        'montoFinal': body.get("montoFinal")
+        'serviceId': body["serviceId"],
+        'userId': body["userId"],
+        'nombreMoto': body["nombreMoto"],
+        'placaMoto': body["placaMoto"],
+        'montoFinal': body["montoFinal"]
     }
     
     transmitir(event, transmission_payload)
@@ -579,8 +613,8 @@ def aceptarServicio(event, context):
     
     transmission_payload = {
         'action': 'servicioAceptado',
-        'serviceId': body.get("serviceId"),
-        'correoMoto': body.get("correoMoto"),
+        'serviceId': body["serviceId"],
+        'correoMoto': body["correoMoto"],
         'placaMoto': moto_response['Item'].get('placa'),
         'nombreMoto': moto_response['Item'].get('nombre'),
         'montoFinal': float(monto_Final)
