@@ -1,684 +1,821 @@
+"""
+MotoRamos — Microservicio WebSocket
+Gestión en tiempo real: solicitud de viaje, asignación, ubicación, cancelación,
+completar viaje e informar estado.
+
+Diseñado para operar con conectividad intermitente en Tarma (3 048 m s.n.m.).
+Incluye reconexión robusta y operaciones DynamoDB atómicas para evitar duplicidad.
+
+Flujo de un servicio:
+  1. Pasajero envía 'servicioRequerido' → se crea servicio PENDIENTE
+  2. Conductores activos reciben la notificación → mandan 'aceptarServicio'
+  3. Se asigna atómicamente al primer conductor → estado EN_CAMINO
+  4. Conductor actualiza ubicación con 'registrarUbicacionMoto'
+  5. Conductor envía 'iniciarViaje' cuando recoge al pasajero → EN_CURSO
+  6. Conductor envía 'completarViaje' al llegar a destino → COMPLETADO
+  7. Cualquiera puede enviar 'cancelarServicio' antes de EN_CURSO → CANCELADO
+  8. 'informar' → envío genérico de mensajes entre pasajero y conductor
+"""
+
 import json
 import os
 import uuid
 import boto3
+import time
 from decimal import Decimal
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from botocore.exceptions import ClientError
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Key, Attr
 
-CONNECTIONS_TABLE = os.environ['connectionsTable']
-MOTOS_TABLE= os.environ["motosTable"]
-CONDUCTORES_TABLE= os.environ["conductoresTable"]
-USUARIOS_TABLE= os.environ["usuariosTable"]
-SERVICIOS_TABLE=os.environ["serviciosTable"]
-UBICACIONES_MOTOS_TABLE= os.environ["ubicacionesMotosTable"]
+from auth_utils import verify_jwt
 
-def transmitir(event, message_payload_dict):
-    if not CONNECTIONS_TABLE:
-        print("[Error] Variables de entorno de tablas no definidas.")
-        return
-    connections_Table= boto3.resource('dynamodb').Table(CONNECTIONS_TABLE)
+# ─── Tablas y recursos ──────────────────────────────────────────────────────
+CONEXIONES_TABLE = os.environ['conexionesTable']
+SERVICIOS_TABLE = os.environ['serviciosTable']
+CONDUCTORES_TABLE = os.environ['conductoresTable']
+USUARIOS_TABLE = os.environ['usuariosTable']
 
-    try:
-        domain = event["requestContext"]["domainName"]
-        stage = event["requestContext"]["stage"]
-        endpoint_url = f"https://{domain}/{stage}"
-        apigateway_management = boto3.client(
-            "apigatewaymanagementapi", endpoint_url=endpoint_url
-        )
-    except KeyError:
-        print("Error: No se pudo obtener el dominio del evento WebSocket.")
-        return
-
-    action = message_payload_dict.get('action')
-    destinatarios = []
-
-    if action == 'ubicacionMoto':
-        print("Acción detectada: Enviar ubicación a USUARIOS")
-        
-        try:
-            response = connections_Table.query(
-                IndexName='RolIndex',  # Usamos el índice que creaste en el YAML
-                KeyConditionExpression=Key('rol').eq('USUARIO') # Solo traemos USUARIOS
-            )
-            destinatarios = response.get('Items', [])
-            print(f"Se encontraron {len(destinatarios)} usuarios conectados.")
-            
-        except ClientError as e:
-            print(f"Error consultando DynamoDB Index: {e}")
-            return
-
-    elif action == 'servicioRequerido':
-        print("Acción detectada: Enviar solicitud de servicio a CONDUCTORES")
-        
-        try:
-            response = connections_Table.query(
-                IndexName='RolIndex',
-                KeyConditionExpression=Key('rol').eq('CONDUCTOR')
-            )
-            destinatarios = response.get('Items', [])
-            print(f"Se encontraron {len(destinatarios)} conductores conectados.")
-            
-        except ClientError as e:
-            print(f"Error consultando DynamoDB Index: {e}")
-            return
-    
-    elif action == 'servicioAceptado':
-        print("Acción detectada: Notificar a USUARIO sobre servicio aceptado")
-        try:
-            response = connections_Table.query(
-                IndexName='RolIndex',  # Usamos el índice que creaste en el YAML
-                KeyConditionExpression=Key('rol').eq('USUARIO') # Solo traemos USUARIOS
-            )
-            destinatarios = response.get('Items', [])
-            print(f"Se encontraron {len(destinatarios)} usuarios conectados.")
-            
-        except ClientError as e:
-            print(f"Error consultando DynamoDB Index: {e}")
-            return
-
-    elif action == 'solicitudServicio':
-        target_user_id = message_payload_dict.get('userId')
-        print("Acción detectada: Enviar solicitud de aceptar servicio a USUARIO")
-        try:
-            response = connections_Table.query(
-                IndexName='UserIdIndex',
-                KeyConditionExpression=Key('userId').eq(target_user_id)
-            )
-            destinatarios = response.get('Items', [])
-            if not destinatarios:
-                print(f"El usuario {target_user_id} no está conectado actualmente.")
-            
-            else:
-                print(f"Se encontró al usuario conectado con userId: {target_user_id}")
-
-            
-        except ClientError as e:
-            print(f"Error consultando DynamoDB Index: {e}")
-            return
-
-    elif action == 'aceptarServicio':
-        target_user_id = message_payload_dict.get('usuarioId') 
-        
-        if target_user_id:
-            print(f"Buscando conexión para el usuario: {target_user_id}")
-            try:
-                # Usamos el NUEVO ÍNDICE para buscar la conexión de ese usuario
-                response = connections_Table.query(
-                    IndexName='UserIdIndex',
-                    KeyConditionExpression=Key('usuarioId').eq(target_user_id)
-                )
-                destinatarios = response.get('Items', [])
-                
-                if not destinatarios:
-                    print(f"El usuario {target_user_id} no está conectado actualmente.")
-                else:
-                    print(f"Se encontró al usuario conectado con usuarioId: {target_user_id}")
-
-            except ClientError as e:
-                print(f"Error query UserIdIndex: {e}")
-        else:
-            print("Error: aceptarServicio requiere 'usuarioIdDestino' en el payload")
-    
-    elif action == 'servicioCompletado':
-        target_user_id = message_payload_dict.get('usuarioId') 
-        
-        if target_user_id:
-            print(f"Buscando conexión para el usuario: {target_user_id}")
-            try:
-                # Usamos el NUEVO ÍNDICE para buscar la conexión de ese usuario
-                response = connections_Table.query(
-                    IndexName='UserIdIndex',
-                    KeyConditionExpression=Key('usuarioId').eq(target_user_id)
-                )
-                destinatarios = response.get('Items', [])
-                
-                if not destinatarios:
-                    print(f"El usuario {target_user_id} no está conectado actualmente.")
-            except ClientError as e:
-                print(f"Error query UserIdIndex: {e}")
-        else:
-            print("Error: servicioCompletado requiere 'usuarioId' en el payload")
-
-    else:
-        print(f"Acción '{action}' no tiene lógica de difusión definida.")
-        return
-
-    # 3. Bucle de Envío (Broadcast)
-    if not destinatarios:
-        print("No hay destinatarios para enviar.")
-        return
-
-    message_json = json.dumps(message_payload_dict)
-
-    for user in destinatarios:
-        connection_id = user['connectionId']
-        
-        try:
-            apigateway_management.post_to_connection(
-                ConnectionId=connection_id,
-                Data=message_json
-            )
-        except ClientError as e:
-            # Manejo de usuarios desconectados (limpieza de BD)
-            if e.response['Error']['Code'] == 'GoneException':
-                print(f"Usuario {connection_id} ya no existe. Borrando...")
-                # Para borrar necesitamos la Primary Key (connectionId), no la del Index
-                connections_Table.delete_item(Key={'connectionId': connection_id})
-            else:
-                print(f"Error enviando a {connection_id}: {e}")
-
-    print("Transmisión completada.")
+dynamodb = boto3.resource('dynamodb')
+ZONA_PERU = ZoneInfo('America/Lima')
 
 
-    # ==============================================================================
-    # 🔔 LÓGICA SNS (NOTIFICACIONES PUSH)
-    # Enviamos a TODOS los usuarios de la tabla de dispositivos
-    # ==============================================================================
-    # if SNS_TOPIC_ARN and USERS_DEVICES_TABLE:
-    #     try:
-    #         print("--- [SNS] Iniciando proceso de notificación masiva ---")
-    #         users_dev_table = boto3.resource('dynamodb').Table(USERS_DEVICES_TABLE)
-            
-    #         # A. Escaneamos la tabla para sacar todos los correos (tenant_id)
-    #         # NOTA: .scan() es costoso. En producción usa Query o lógica específica.
-    #         response_scan = users_dev_table.scan(
-    #             ProjectionExpression='tenant_id' 
-    #         )
-    #         items = response_scan.get('Items', [])
-            
-    #         # B. Extraemos IDs únicos (usamos set para evitar duplicados si hay paginación sucia)
-    #         # Tu Worker espera una lista de "correos" (que son tus tenant_id)
-    #         destinatarios = list(set([item['tenant_id'] for item in items]))
+# ═══════════════════════════════════════════════════════════════════════════════
+# Helpers internos
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    #         if destinatarios:
-    #             # C. Construimos el Payload EXACTAMENTE como lo espera tu Lambda Worker
-    #             sns_payload = {
-    #                 "correos": destinatarios,
-    #                 "title": "🚛 Camión en camino",
-    #                 "body": f"El recolector está pasando"
-    #             }
+def _json_serial(obj):
+    """Serializer para Decimal y tipos no estándar de DynamoDB."""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, set):
+        return list(obj)
+    raise TypeError(f'Tipo no serializable: {type(obj)}')
 
-    #             # D. Publicamos al SNS
-    #             sns_client.publish(
-    #                 TopicArn=SNS_TOPIC_ARN,
-    #                 Message=json.dumps(sns_payload)
-    #             )
-    #             print(f"[SNS] Mensaje enviado al Topic para {len(destinatarios)} usuarios.")
-    #         else:
-    #             print("[SNS] No se encontraron usuarios en la tabla para notificar.")
 
-    #     except Exception as e:
-    #         # Ponemos try/except para que si falla SNS, NO rompa el WebSocket
-    #         print(f"[Error SNS] Fallo al enviar notificación: {e}")
-    # else:
-    #     print("[SNS] Omitido: Faltan variables SNS_TOPIC_ARN o USERS_DEVICES_TABLE")
-
-def connectionManager(event, context):
-    connection_id = event['requestContext']['connectionId']
-    route_key = event['requestContext']['routeKey']
-    
-    query_params = event.get('queryStringParameters', {}) or {}
-
-    if not CONNECTIONS_TABLE:
-        print("Error: CONNECTIONS_TABLE no está definida en las variables de entorno.")
-        return {'statusCode': 500, 'body': 'Error de configuración del servidor.'}
-        
-    table = boto3.resource("dynamodb").Table(CONNECTIONS_TABLE)
-
-    if route_key == '$connect':
-        try:
-            
-            item = {
-                'connectionId': connection_id,
-                'rol': query_params.get('rol', 'NULL'),
-                'userId': query_params.get('userId', 'NULL')
-            }
-
-            table.put_item(Item=item)
-    
-            print(f"Conexión registrada: {connection_id} con rol {item['rol']}")
-            
-            return {'statusCode': 200, 'body': 'Conectado.'}
-
-        except Exception as e:
-            print(f"Error en $connect: {e}")
-            return {'statusCode': 500, 'body': 'Fallo en $connect.'}
-
-    elif route_key == '$disconnect':
-        try:
-            table.delete_item(
-                Key={'connectionId': connection_id}
-            )
-            print(f"Conexión eliminada: {connection_id}")
-            
-            return {'statusCode': 200, 'body': 'Desconectado.'}
-            
-        except Exception as e:
-            print(f"Error en $disconnect (no crítico): {e}")
-            return {'statusCode': 200, 'body': 'Desconectado con error de limpieza.'}
-
-    return {'statusCode': 500, 'body': 'Error en connectionManager.'}
-
-def defaultHandler(event, context):
-    print(f"Ruta $default invocada. Evento: {event}")
-    return {
-        'statusCode': 404,
-        'body': json.dumps("Acción no reconocida.")
-    }
-
-def registrarUbicacionMoto(event, context):
-    print("Evento recibido en registrarUbicacionMoto")
-
-    zona_peru = ZoneInfo("America/Lima")
-    ahora = datetime.now(zona_peru)
-
-    timestamp_str = ahora.isoformat()
-
-    try:
-        body = json.loads(event['body'])
-    except (TypeError, json.JSONDecodeError):
-        print("Cuerpo de la solicitud no es un JSON válido")
-        return {
-            'statusCode': 400,
-            'body': json.dumps({'error': 'El cuerpo de la solicitud no es un JSON válido'})
-        }
-
-    try:
-        motoId= body.get("motoId")
-    except KeyError:
-        print("Falta motoId en el cuerpo de la solicitud")
-        return {
-            'statusCode': 400,
-            'body': json.dumps({'error': 'Falta motoId en el cuerpo de la solicitud'})
-        }
-    
-    motos_Table=boto3.resource('dynamodb').Table(MOTOS_TABLE)
-    response= motos_Table.get_item(
-        Key={
-            'motoId': motoId,
-        }
+def _get_apigw_client(event):
+    """Construye el cliente de API Gateway Management para enviar mensajes WebSocket."""
+    domain = event['requestContext']['domainName']
+    stage = event['requestContext']['stage']
+    return boto3.client(
+        'apigatewaymanagementapi',
+        endpoint_url=f'https://{domain}/{stage}',
     )
 
-    if 'Item' not in response:
-        return {
-            'statusCode': 404,
-            'body': json.dumps({'error': 'Moto no encontrada'})
-        }
+
+def _send_to_connection(apigw, connection_id, payload: dict):
+    """Envía un mensaje JSON a una conexión WebSocket específica.
+    Si la conexión ya no existe, la elimina de DynamoDB (limpieza por desconexión)."""
     try:
-        lat_float = float(body["latitud"])
-        lon_float = float(body["longitud"])
-    except (ValueError, TypeError):
-        return {
-            'statusCode': 400, 
-            'body': json.dumps({'error': 'Latitud y Longitud deben ser números válidos'})
-        }
-
-    if not (-90 <= lat_float <= 90):
-        return {'statusCode': 400, 'body': json.dumps({'error': 'Latitud inválida (debe estar entre -90 y 90)'})}
-        
-    if not (-180 <= lon_float <= 180):
-        return {'statusCode': 400, 'body': json.dumps({'error': 'Longitud inválida (debe estar entre -180 y 180)'})}
-
-    lat_decimal = Decimal(str(lat_float))
-    lon_decimal = Decimal(str(lon_float))
-
-    ubicacion={
-        'latitud': float(lat_decimal),
-        'longitud': float(lon_decimal)
-    }
-
-    transmission_payload = {
-            'action': 'ubicacionMoto',
-            'placa': body.get("placa"),
-            'nombre': body.get("nombre"),
-            'ubicacion': ubicacion
-    }
-    
-    ubicacion_Moto = {
-        'placa': body.get("placa"),
-        'timestamp': timestamp_str,
-        'latitud': lat_decimal,   
-        'longitud': lon_decimal,
-        'nombre': body.get("nombre"),
-    }
-    
-    try:
-        ubicaciones_Motos_Table=boto3.resource('dynamodb').Table(UBICACIONES_MOTOS_TABLE)
-        ubicaciones_Motos_Table.put_item(Item=ubicacion_Moto)
-    except Exception as e:
-        print(f"Error al almacenar la ubicación en DynamoDB: {e}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': 'Error al almacenar la ubicación'})
-        }
-        
-    transmitir(event, transmission_payload)
-
-    print("Ubicación de la moto almacenada y transmitida exitosamente")
-
-    return {
-        'statusCode': 200,
-        'body': json.dumps({'message': 'Ubicación de la moto registrada exitosamente'})
-    }
-
-def registrarServicio(event, context):
-    print("Evento recibido en registrarServicioRequerido")
-    zona_peru = ZoneInfo("America/Lima")
-    ahora = datetime.now(zona_peru)
-    
-    fecha_actual_str = ahora.strftime("%Y-%m-%d")
-    hora_actual_str = ahora.strftime("%H:%M:%S")
-
-    body = json.loads(event['body'])
-    
-    try:
-        print("Obteniendo información del usuario desde DynamoDB...")
-        print(USUARIOS_TABLE)
-        
-        usuario_Table = boto3.resource('dynamodb').Table(USUARIOS_TABLE)
-        response = usuario_Table.get_item(
-            Key={
-                'userId': body["usuarioId"],
-            }
+        apigw.post_to_connection(
+            ConnectionId=connection_id,
+            Data=json.dumps(payload, default=_json_serial, ensure_ascii=False).encode(),
         )
+    except apigw.exceptions.GoneException:
+        # Conexión muerta — limpiar registro
+        dynamodb.Table(CONEXIONES_TABLE).delete_item(
+            Key={'connectionId': connection_id}
+        )
+    except Exception:
+        pass  # No fallar por una conexión problemática
 
-        if 'Item' not in response:
-            return {
-                'statusCode': 404,
-                'body': json.dumps({'error': 'Usuario no encontrado'})
-            }
-    except Exception as e:
-        print(f"Error al acceder a la tabla de usuarios: {e}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': 'Error al acceder a la tabla de usuarios'})
-        }
-        
-    #GSI    
-    estado = "PENDIENTE"
 
-    nombre_Usuario = response['Item'].get('nombre')
-    correo_Usuario = response['Item'].get('correo')
+def _notify_user(apigw, user_id: str, payload: dict):
+    """Busca todas las conexiones activas del usuario y les envía el mensaje.
+    Un usuario puede tener múltiples conexiones (app + web)."""
+    tabla = dynamodb.Table(CONEXIONES_TABLE)
+    result = tabla.query(
+        IndexName='UserIdIndex',
+        KeyConditionExpression=Key('userId').eq(user_id),
+    )
+    for conn in result.get('Items', []):
+        _send_to_connection(apigw, conn['connectionId'], payload)
 
-    cantidad = body["cantidad"]
-    monto = body["monto"]
-    nombreDestino = body["nombreDestino"]
 
-    try:
-        lat_float_origen = float(body["latitudOrigen"])
-        lon_float_origen = float(body["longitudOrigen"])
-        lat_float_destino= float(body["latitudDestino"])
-        lon_float_destino= float(body["longitudDestino"])
-    except (ValueError, TypeError):
-        return {
-            'statusCode': 400, 
-            'body': json.dumps({'error': 'Latitud y Longitud deben ser números válidos'})
-        }
+def _notify_driver(apigw, driver_id: str, payload: dict):
+    """Busca todas las conexiones activas del conductor y les envía el mensaje."""
+    tabla = dynamodb.Table(CONEXIONES_TABLE)
+    result = tabla.query(
+        IndexName='UserIdIndex',
+        KeyConditionExpression=Key('userId').eq(driver_id),
+    )
+    for conn in result.get('Items', []):
+        _send_to_connection(apigw, conn['connectionId'], payload)
 
-    if not (-90 <= lat_float_origen <= 90 and -90 <= lat_float_destino <= 90):
-        return {'statusCode': 400, 'body': json.dumps({'error': 'Latitud inválida'})}
-        
-    if not (-180 <= lon_float_origen <= 180 and -180 <= lon_float_destino <= 180):
-        return {'statusCode': 400, 'body': json.dumps({'error': 'Longitud inválida'})}
 
-    lat_decimal_origen = Decimal(str(lat_float_origen))
-    lon_decimal_origen = Decimal(str(lon_float_origen))
-    lat_decimal_destino = Decimal(str(lat_float_destino))
-    lon_decimal_destino = Decimal(str(lon_float_destino))
+def _broadcast_to_active_drivers(apigw, payload: dict, exclude_id: str = ''):
+    """Envía mensaje a TODOS los conductores activos —
+    esencial para difundir nuevas solicitudes de viaje cerca de la Plaza de Armas."""
+    tabla_cond = dynamodb.Table(CONDUCTORES_TABLE)
+    tabla_conn = dynamodb.Table(CONEXIONES_TABLE)
 
-    servicio_requerido = {
-        'serviceId': str(uuid.uuid4()),
-        'estado': estado,
-        'usuarioId': body["usuarioId"],
+    # Scan de conductores activos (para Tarma la cantidad es manejable)
+    result = tabla_cond.scan(
+        FilterExpression=Attr('activo').eq(True),
+        ProjectionExpression='driverId',
+    )
+    for driver in result.get('Items', []):
+        did = driver['driverId']
+        if did == exclude_id:
+            continue
+        conns = tabla_conn.query(
+            IndexName='UserIdIndex',
+            KeyConditionExpression=Key('userId').eq(did),
+        )
+        for conn in conns.get('Items', []):
+            _send_to_connection(apigw, conn['connectionId'], payload)
 
-        'fechaPedida': fecha_actual_str,
-        'horaPedida': hora_actual_str,
-        
-        'nombreUsuario': nombre_Usuario,
-        'correoUsuario': correo_Usuario,
-        'cantidad': cantidad,
-        'monto': Decimal(str(float(monto))),
-        'latitudOrigen': lat_decimal_origen,
-        'longitudOrigen': lon_decimal_origen,
-        'latitudDestino': lat_decimal_destino,
-        'longitudDestino': lon_decimal_destino,
-        'nombreDestino': nombreDestino
-    }
 
-    try:
-        servicio_Table = boto3.resource('dynamodb').Table(SERVICIOS_TABLE)
-        servicio_Table.put_item(Item=servicio_requerido)
-        
-    except Exception as e:
-        print(f"Error al almacenar en DynamoDB: {e}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': 'Error al almacenar la solicitud'})
-        }
-    
-    transmission_payload = {
-        'action': 'servicioRequerido',
-        'serviceId': servicio_requerido['serviceId'],
-        'usuarioId': body.get("usuarioId"),
-        'latitudOrigen': float(lat_decimal_origen),
-        'longitudOrigen': float(lon_decimal_origen),
-        'latitudDestino': float(lat_decimal_destino),
-        'longitudDestino': float(lon_decimal_destino),
-        'monto': float(monto),
-        'cantidad': cantidad
-    }
-    
-    transmitir(event, transmission_payload)
+def _ws_ok(body=None):
+    return {'statusCode': 200, 'body': json.dumps(body or {'ok': True})}
 
-    print("Ubicación de usuario almacenada y transmitida exitosamente")
-    
+
+def _ws_error(msg, code=400):
+    return {'statusCode': code, 'body': json.dumps({'error': msg})}
+
+
+def _parse_body(event) -> dict:
+    """Parsea el body del mensaje WebSocket."""
+    raw = event.get('body', '{}')
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _get_claims(event) -> dict | None:
+    """Extrae las claims del JWT almacenadas en la conexión."""
+    conn_id = event['requestContext']['connectionId']
+    tabla = dynamodb.Table(CONEXIONES_TABLE)
+    result = tabla.get_item(Key={'connectionId': conn_id})
+    if 'Item' not in result:
+        return None
+    item = result['Item']
     return {
-        'statusCode': 200,
-        'body': json.dumps({
-            'message': 'Servicio registrado exitosamente'
+        'sub': item.get('userId', ''),
+        'rol': item.get('rol', ''),
+        'nombre': item.get('nombre', ''),
+        'correo': item.get('correo', ''),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# $connect — Autenticación JWT al conectar al WebSocket
+# ═══════════════════════════════════════════════════════════════════════════════
+def connect(event, context):
+    """Valida JWT en query string: wss://...?token=<jwt>
+    En Tarma, la reconexión automática del frontend debe reenviar el token."""
+    conn_id = event['requestContext']['connectionId']
+    params = event.get('queryStringParameters') or {}
+    token = params.get('token', '')
+
+    if not token:
+        return {'statusCode': 401, 'body': 'Token requerido'}
+
+    claims = verify_jwt(token)
+    if claims is None:
+        return {'statusCode': 401, 'body': 'Token inválido o expirado'}
+
+    # Registrar conexión
+    tabla = dynamodb.Table(CONEXIONES_TABLE)
+    tabla.put_item(Item={
+        'connectionId': conn_id,
+        'userId': claims['sub'],
+        'rol': claims.get('rol', ''),
+        'nombre': claims.get('nombre', ''),
+        'correo': claims.get('correo', ''),
+        'conectadoEn': datetime.now(ZONA_PERU).isoformat(),
+        'ttl': int(time.time()) + 86400,  # Auto-expirar en 24h
+    })
+
+    return {'statusCode': 200, 'body': 'Conectado'}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# $disconnect — Limpieza al desconectar
+# ═══════════════════════════════════════════════════════════════════════════════
+def disconnect(event, context):
+    """Elimina la conexión de DynamoDB. El frontend reconexiona automáticamente."""
+    conn_id = event['requestContext']['connectionId']
+    tabla = dynamodb.Table(CONEXIONES_TABLE)
+    tabla.delete_item(Key={'connectionId': conn_id})
+    return {'statusCode': 200, 'body': 'Desconectado'}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# $default — Ruta por defecto para mensajes no reconocidos
+# ═══════════════════════════════════════════════════════════════════════════════
+def default_handler(event, context):
+    """Maneja mensajes WebSocket con action desconocida."""
+    conn_id = event['requestContext']['connectionId']
+    apigw = _get_apigw_client(event)
+    _send_to_connection(apigw, conn_id, {
+        'action': 'error',
+        'message': 'Acción no reconocida. Acciones válidas: servicioRequerido, '
+                   'aceptarServicio, cancelarServicio, iniciarViaje, completarViaje, '
+                   'registrarUbicacionMoto, informar, ping',
+    })
+    return _ws_ok()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# servicioRequerido — Pasajero solicita un viaje
+# ═══════════════════════════════════════════════════════════════════════════════
+def servicio_requerido(event, context):
+    """El pasajero solicita un mototaxi.
+    Crea el servicio en DynamoDB y notifica a todos los conductores activos.
+
+    Body esperado:
+    {
+      "action": "servicioRequerido",
+      "origen": {"lat": -11.4198, "lng": -75.6896, "direccion": "Plaza de Armas"},
+      "destino": {"lat": -11.4150, "lng": -75.6820, "direccion": "Terminal Terrestre"},
+      "precioSugerido": 4.00,
+      "comentario": "Tengo una maleta"
+    }
+    """
+    claims = _get_claims(event)
+    if not claims:
+        return _ws_error('No autenticado', 401)
+    if claims['rol'] != 'USUARIO':
+        return _ws_error('Solo usuarios pueden solicitar servicios', 403)
+
+    body = _parse_body(event)
+    origen = body.get('origen')
+    destino = body.get('destino')
+
+    if not origen or not destino:
+        return _ws_error('Se requiere origen y destino')
+
+    ahora = datetime.now(ZONA_PERU).isoformat()
+    service_id = str(uuid.uuid4())
+
+    tabla = dynamodb.Table(SERVICIOS_TABLE)
+
+    # Verificar que el usuario no tenga un servicio activo (anti-duplicidad)
+    active = tabla.query(
+        IndexName='UsuarioEstadoIndex',
+        KeyConditionExpression=(
+            Key('usuarioId').eq(claims['sub']) &
+            Key('estado').eq('PENDIENTE')
+        ),
+        Select='COUNT',
+    )
+    if active['Count'] > 0:
+        return _ws_error('Ya tienes un servicio pendiente. Cancela o espera a que sea aceptado.')
+
+    active_curso = tabla.query(
+        IndexName='UsuarioEstadoIndex',
+        KeyConditionExpression=(
+            Key('usuarioId').eq(claims['sub']) &
+            Key('estado').eq('EN_CURSO')
+        ),
+        Select='COUNT',
+    )
+    if active_curso['Count'] > 0:
+        return _ws_error('Ya tienes un viaje en curso.')
+
+    item = {
+        'serviceId': service_id,
+        'usuarioId': claims['sub'],
+        'nombreUsuario': claims.get('nombre', ''),
+        'driverId': 'NONE',  # Aún no asignado
+        'estado': 'PENDIENTE',
+        'origen': origen,
+        'destino': destino,
+        'precioSugerido': Decimal(str(body.get('precioSugerido', 0))),
+        'precioFinal': Decimal('0'),
+        'comentario': body.get('comentario', ''),
+        'creadoEn': ahora,
+        'actualizadoEn': ahora,
+    }
+
+    # Escritura condicional: no duplicar si ya existe (idempotencia)
+    try:
+        tabla.put_item(
+            Item=item,
+            ConditionExpression='attribute_not_exists(serviceId)',
+        )
+    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        return _ws_error('Error de duplicidad. Intente nuevamente.')
+
+    # Notificar a todos los conductores activos
+    apigw = _get_apigw_client(event)
+    _broadcast_to_active_drivers(apigw, {
+        'action': 'nuevoServicio',
+        'serviceId': service_id,
+        'origen': origen,
+        'destino': destino,
+        'precioSugerido': float(item['precioSugerido']),
+        'nombreUsuario': claims.get('nombre', ''),
+        'comentario': body.get('comentario', ''),
+        'creadoEn': ahora,
+    })
+
+    # Confirmar al pasajero
+    conn_id = event['requestContext']['connectionId']
+    _send_to_connection(apigw, conn_id, {
+        'action': 'servicioCreado',
+        'serviceId': service_id,
+        'estado': 'PENDIENTE',
+        'message': 'Buscando conductor disponible en Tarma...',
+    })
+
+    return _ws_ok()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# aceptarServicio — Conductor acepta el viaje (asignación atómica)
+# ═══════════════════════════════════════════════════════════════════════════════
+def aceptar_servicio(event, context):
+    """Un conductor acepta un servicio pendiente.
+    Usa ConditionExpression para asignación atómica (primer conductor gana).
+
+    Body esperado:
+    {
+      "action": "aceptarServicio",
+      "serviceId": "uuid-del-servicio",
+      "precioOfrecido": 5.00
+    }
+    """
+    claims = _get_claims(event)
+    if not claims:
+        return _ws_error('No autenticado', 401)
+    if claims['rol'] != 'CONDUCTOR':
+        return _ws_error('Solo conductores pueden aceptar servicios', 403)
+
+    body = _parse_body(event)
+    service_id = body.get('serviceId')
+    if not service_id:
+        return _ws_error('serviceId es requerido')
+
+    ahora = datetime.now(ZONA_PERU).isoformat()
+    tabla = dynamodb.Table(SERVICIOS_TABLE)
+    tabla_cond = dynamodb.Table(CONDUCTORES_TABLE)
+
+    # Obtener datos del conductor
+    driver_res = tabla_cond.get_item(
+        Key={'driverId': claims['sub']},
+        ProjectionExpression='nombre, apellido, telefono, placa, marca, color, fotoUrl, '
+                             'sumaCalificaciones, totalCalificaciones',
+    )
+    driver_data = driver_res.get('Item', {})
+
+    # Asignación atómica: solo funciona si estado=PENDIENTE y driverId=NONE
+    try:
+        tabla.update_item(
+            Key={'serviceId': service_id},
+            UpdateExpression=(
+                'SET driverId = :d, estado = :e, nombreConductor = :nc, '
+                'telefonoConductor = :tc, placaConductor = :pl, '
+                'precioFinal = :pf, aceptadoEn = :t, actualizadoEn = :t'
+            ),
+            ConditionExpression='estado = :pendiente AND driverId = :none',
+            ExpressionAttributeValues={
+                ':d': claims['sub'],
+                ':e': 'EN_CAMINO',
+                ':pendiente': 'PENDIENTE',
+                ':none': 'NONE',
+                ':nc': driver_data.get('nombre', '') + ' ' + driver_data.get('apellido', ''),
+                ':tc': driver_data.get('telefono', ''),
+                ':pl': driver_data.get('placa', ''),
+                ':pf': Decimal(str(body.get('precioOfrecido', 0))),
+                ':t': ahora,
+            },
+        )
+    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        conn_id = event['requestContext']['connectionId']
+        apigw = _get_apigw_client(event)
+        _send_to_connection(apigw, conn_id, {
+            'action': 'servicioNoDisponible',
+            'serviceId': service_id,
+            'message': 'Este servicio ya fue tomado por otro conductor.',
         })
+        return _ws_ok()
 
-    }
+    # Obtener servicio actualizado para notificar
+    serv_result = tabla.get_item(Key={'serviceId': service_id})
+    serv = serv_result.get('Item', {})
 
-def cancelarServicio(event, context):
-    print("Evento recibido en cancelarServicio")
-    body= json.loads(event['body'])
-    
-    try:
-        servicio_Table = boto3.resource('dynamodb').Table(SERVICIOS_TABLE)
-        servicio_Table.update_item(
-            Key={'serviceId': body["serviceId"]},
-            UpdateExpression="SET estado = :e",
-            ExpressionAttributeValues={
-                ':e': 'CANCELADO'
-            }
-        )
-        print("Servicio cancelado actualizado en DynamoDB")
-    
-    except Exception as e:
-        print(f"Error al actualizar el servicio en DynamoDB: {e}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': 'Error al cancelar el servicio'})
-        }
-    
-    transmission_payload = {
-        'action': 'servicioCancelado',
-        'serviceId': body["serviceId"],
-    }
-    
-    transmitir(event, transmission_payload)
-    print("Servicio cancelado transmitido exitosamente")
+    apigw = _get_apigw_client(event)
 
-    return {
-        'statusCode': 200,
-        'body': json.dumps({'message': 'Servicio cancelado registrado exitosamente'})
-    }
+    # Calcular calificación promedio del conductor
+    total_cal = int(driver_data.get('totalCalificaciones', 0))
+    prom = round(float(driver_data.get('sumaCalificaciones', 0)) / total_cal, 2) if total_cal > 0 else 5.0
 
-def solicitudServicio(event, context):
-    print("Evento recibido en solicitudServicio")
-    body= json.loads(event['body'])
-    
-    transmission_payload = {    
-        'action': 'solicitudServicio',
-        'serviceId': body["serviceId"],
-        'userId': body["userId"],
-        'nombreMoto': body["nombreMoto"],
-        'placaMoto': body["placaMoto"],
-        'montoFinal': body["montoFinal"]
-    }
-    
-    transmitir(event, transmission_payload)
-    print("Solicitud de servicio transmitida exitosamente")
-
-    return {
-        'statusCode': 200,
-        'body': json.dumps({'message': 'Solicitud de servicio transmitida exitosamente'})
-    }
-
-def aceptarServicio(event, context):
-    print("Evento recibido en aceptarServicio")
-    body= json.loads(event['body'])
-
-    try:
-        motos_Table=boto3.resource('dynamodb').Table(MOTOS_TABLE)
-        print("MotoId recibido:", body["motoId"])
-        moto_response= motos_Table.get_item(
-            Key={
-                'motoId': body["motoId"],
-            }
-        )
-
-        if 'Item' not in moto_response:
-            return {
-                'statusCode': 404,
-                'body': json.dumps({'error': 'Moto no encontrada'})
-            }
-        
-        if moto_response['Item'].get('estado') == 'NO_TRABAJANDO':
-            print("La moto no está trabajando, no puede aceptar servicios")
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': 'La moto no está trabajando'})
-            }
-        
-    except Exception as e:
-        print(f"Error al acceder a la tabla de motos: {e}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': 'Error al acceder a la tabla de motos'})
-        }
-
-    monto_Final= body["montoFinal"]
-
-    try:
-        servicio_Table = boto3.resource('dynamodb').Table(SERVICIOS_TABLE)
-        servicio_Table.update_item(
-            Key={'serviceId': body["serviceId"]},
-            
-            ConditionExpression="attribute_not_exists(placaMoto) AND estado = :estadoPendiente",
-
-            UpdateExpression="SET estado = :e, placaMoto = :pM, nombreMoto = :nM, montoFinal = :mF",
-            
-            ExpressionAttributeValues={
-                ':e': 'ATENDIDO',
-                ':nM': moto_response['Item'].get('nombre'),
-                ':pM': moto_response['Item'].get('placa'),
-                ':mF': Decimal(str(float(monto_Final))),
-                ':estadoPendiente': 'PENDIENTE' 
-            }
-        )
-
-        print("Servicio ATENDIDO actualizado en DynamoDB")
-
-        motos_Table.update_item(
-            Key={'motoId': body["motoId"]},
-            UpdateExpression="SET estado = :e",
-            ExpressionAttributeValues={
-                ':e': 'CONDUCIENDO'
-            }
-        )
-
-        print("Estado de la moto actualizado a CONDUCIENDO en DynamoDB")
-
-    except servicio_Table.meta.client.exceptions.ConditionalCheckFailedException:
-        print("El servicio ya fue aceptado o no está en estado PENDIENTE")
-        return {
-            'statusCode': 400,
-            'body': json.dumps({'error': 'El servicio ya fue aceptado o no está en estado PENDIENTE'})
-        }
-    
-    transmission_payload = {
+    # Notificar al pasajero: tu conductor va en camino
+    _notify_user(apigw, serv.get('usuarioId', ''), {
         'action': 'servicioAceptado',
-        'serviceId': body["serviceId"],
-        'correoMoto': body["correoMoto"],
-        'placaMoto': moto_response['Item'].get('placa'),
-        'nombreMoto': moto_response['Item'].get('nombre'),
-        'montoFinal': float(monto_Final)
-    }
-    
-    transmitir(event, transmission_payload)
-    print("Servicio aceptado almacenado y transmitido exitosamente")
+        'serviceId': service_id,
+        'estado': 'EN_CAMINO',
+        'conductor': {
+            'driverId': claims['sub'],
+            'nombre': driver_data.get('nombre', ''),
+            'apellido': driver_data.get('apellido', ''),
+            'telefono': driver_data.get('telefono', ''),
+            'placa': driver_data.get('placa', ''),
+            'marca': driver_data.get('marca', ''),
+            'color': driver_data.get('color', ''),
+            'fotoUrl': driver_data.get('fotoUrl', ''),
+            'calificacion': prom,
+        },
+        'precioFinal': float(serv.get('precioFinal', 0)),
+        'message': '¡Tu conductor está en camino!',
+    })
 
-    return {
-        'statusCode': 200,
-        'body': json.dumps({'message': 'Servicio aceptado registrado exitosamente'})
-    }
+    # Confirmar al conductor
+    conn_id = event['requestContext']['connectionId']
+    _send_to_connection(apigw, conn_id, {
+        'action': 'servicioAceptadoConfirmacion',
+        'serviceId': service_id,
+        'estado': 'EN_CAMINO',
+        'origen': serv.get('origen', {}),
+        'destino': serv.get('destino', {}),
+        'nombreUsuario': serv.get('nombreUsuario', ''),
+        'precioFinal': float(serv.get('precioFinal', 0)),
+        'message': 'Servicio aceptado. Ve al punto de recojo.',
+    })
 
-def completarServicio(event, context):
-    print("Evento recibido en completarServicio")
-    body= json.loads(event['body'])
-    zona_peru = ZoneInfo("America/Lima")
-    ahora = datetime.now(zona_peru)
-    
-    fecha_actual_str = ahora.strftime("%Y-%m-%d")
-    hora_actual_str = ahora.strftime("%H:%M:%S")
+    # Notificar a otros conductores que el servicio ya no está disponible
+    _broadcast_to_active_drivers(apigw, {
+        'action': 'servicioTomado',
+        'serviceId': service_id,
+    }, exclude_id=claims['sub'])
+
+    return _ws_ok()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# iniciarViaje — Conductor recogió al pasajero, inicia el viaje
+# ═══════════════════════════════════════════════════════════════════════════════
+def iniciar_viaje(event, context):
+    """El conductor confirma que recogió al pasajero. Estado → EN_CURSO.
+
+    Body esperado:
+    { "action": "iniciarViaje", "serviceId": "uuid" }
+    """
+    claims = _get_claims(event)
+    if not claims:
+        return _ws_error('No autenticado', 401)
+    if claims['rol'] != 'CONDUCTOR':
+        return _ws_error('Solo conductores pueden iniciar viajes', 403)
+
+    body = _parse_body(event)
+    service_id = body.get('serviceId')
+    if not service_id:
+        return _ws_error('serviceId es requerido')
+
+    ahora = datetime.now(ZONA_PERU).isoformat()
+    tabla = dynamodb.Table(SERVICIOS_TABLE)
 
     try:
-        servicio_Table = boto3.resource('dynamodb').Table(SERVICIOS_TABLE)
-        servicio_Table.update_item(
-            Key={'serviceId': body["serviceId"]},
-            UpdateExpression="SET estado = :e, fechaCompletado = :fC, horaCompletado = :hC",
+        tabla.update_item(
+            Key={'serviceId': service_id},
+            UpdateExpression='SET estado = :e, iniciadoEn = :t, actualizadoEn = :t',
+            ConditionExpression='estado = :enc AND driverId = :d',
+            ExpressionAttributeValues={
+                ':e': 'EN_CURSO',
+                ':enc': 'EN_CAMINO',
+                ':d': claims['sub'],
+                ':t': ahora,
+            },
+        )
+    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        return _ws_error('No se puede iniciar el viaje. Verifica el estado del servicio.')
+
+    # Obtener servicio para notificar al pasajero
+    serv = tabla.get_item(Key={'serviceId': service_id}).get('Item', {})
+    apigw = _get_apigw_client(event)
+
+    _notify_user(apigw, serv.get('usuarioId', ''), {
+        'action': 'viajeIniciado',
+        'serviceId': service_id,
+        'estado': 'EN_CURSO',
+        'message': '¡Viaje iniciado! Ya estás en camino a tu destino.',
+    })
+
+    conn_id = event['requestContext']['connectionId']
+    _send_to_connection(apigw, conn_id, {
+        'action': 'viajeIniciadoConfirmacion',
+        'serviceId': service_id,
+        'estado': 'EN_CURSO',
+        'message': 'Viaje iniciado. Lleva al pasajero a su destino.',
+    })
+
+    return _ws_ok()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# completarViaje — Conductor completó el viaje
+# ═══════════════════════════════════════════════════════════════════════════════
+def completar_viaje(event, context):
+    """El conductor marca el viaje como completado. Estado → COMPLETADO.
+
+    Body esperado:
+    { "action": "completarViaje", "serviceId": "uuid" }
+    """
+    claims = _get_claims(event)
+    if not claims:
+        return _ws_error('No autenticado', 401)
+    if claims['rol'] != 'CONDUCTOR':
+        return _ws_error('Solo conductores pueden completar viajes', 403)
+
+    body = _parse_body(event)
+    service_id = body.get('serviceId')
+    if not service_id:
+        return _ws_error('serviceId es requerido')
+
+    ahora = datetime.now(ZONA_PERU).isoformat()
+    tabla = dynamodb.Table(SERVICIOS_TABLE)
+
+    try:
+        tabla.update_item(
+            Key={'serviceId': service_id},
+            UpdateExpression='SET estado = :e, completadoEn = :t, actualizadoEn = :t',
+            ConditionExpression='estado = :ec AND driverId = :d',
             ExpressionAttributeValues={
                 ':e': 'COMPLETADO',
-                ':fC': fecha_actual_str,
-                ':hC': hora_actual_str
-            }
+                ':ec': 'EN_CURSO',
+                ':d': claims['sub'],
+                ':t': ahora,
+            },
         )
-        print("Servicio completado actualizado en DynamoDB")
+    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        return _ws_error('No se puede completar el viaje. Verifica el estado del servicio.')
 
-        motos_Table=boto3.resource('dynamodb').Table(MOTOS_TABLE)
+    serv = tabla.get_item(Key={'serviceId': service_id}).get('Item', {})
+    apigw = _get_apigw_client(event)
 
-        motos_Table.update_item(
-            Key={'motoId': body["motoId"]},
-            UpdateExpression="SET estado = :e",
+    _notify_user(apigw, serv.get('usuarioId', ''), {
+        'action': 'viajeCompletado',
+        'serviceId': service_id,
+        'estado': 'COMPLETADO',
+        'precioFinal': float(serv.get('precioFinal', 0)),
+        'message': '¡Viaje completado! Gracias por usar MotoRamos. '
+                   'Por favor califica al conductor.',
+    })
+
+    conn_id = event['requestContext']['connectionId']
+    _send_to_connection(apigw, conn_id, {
+        'action': 'viajeCompletadoConfirmacion',
+        'serviceId': service_id,
+        'estado': 'COMPLETADO',
+        'precioFinal': float(serv.get('precioFinal', 0)),
+        'message': 'Viaje completado exitosamente. Puedes calificar al pasajero.',
+    })
+
+    return _ws_ok()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# cancelarServicio — Cancelación por pasajero o conductor
+# ═══════════════════════════════════════════════════════════════════════════════
+def cancelar_servicio(event, context):
+    """Permite cancelar un servicio PENDIENTE o EN_CAMINO.
+    No se puede cancelar un viaje EN_CURSO (ya recogió al pasajero).
+
+    Body esperado:
+    {
+      "action": "cancelarServicio",
+      "serviceId": "uuid",
+      "motivo": "Conductor tardó mucho"
+    }
+    """
+    claims = _get_claims(event)
+    if not claims:
+        return _ws_error('No autenticado', 401)
+
+    body = _parse_body(event)
+    service_id = body.get('serviceId')
+    if not service_id:
+        return _ws_error('serviceId es requerido')
+
+    tabla = dynamodb.Table(SERVICIOS_TABLE)
+    result = tabla.get_item(Key={'serviceId': service_id})
+    if 'Item' not in result:
+        return _ws_error('Servicio no encontrado', 404)
+
+    serv = result['Item']
+    estado = serv.get('estado')
+
+    # Verificar que quien cancela sea el usuario o el conductor del servicio
+    es_usuario = serv.get('usuarioId') == claims['sub']
+    es_conductor = serv.get('driverId') == claims['sub']
+    if not es_usuario and not es_conductor:
+        return _ws_error('No autorizado para cancelar este servicio', 403)
+
+    # Solo cancelar si PENDIENTE o EN_CAMINO
+    if estado not in ('PENDIENTE', 'EN_CAMINO'):
+        return _ws_error(f'No se puede cancelar un servicio en estado {estado}')
+
+    ahora = datetime.now(ZONA_PERU).isoformat()
+    cancelado_por = 'USUARIO' if es_usuario else 'CONDUCTOR'
+    motivo = body.get('motivo', 'Sin motivo especificado')
+
+    try:
+        tabla.update_item(
+            Key={'serviceId': service_id},
+            UpdateExpression=(
+                'SET estado = :e, canceladoEn = :t, canceladoPor = :cp, '
+                'motivoCancelacion = :m, actualizadoEn = :t'
+            ),
+            ConditionExpression='estado IN (:p, :enc)',
             ExpressionAttributeValues={
-                ':e': 'TRABAJANDO'
-            }
+                ':e': 'CANCELADO',
+                ':t': ahora,
+                ':cp': cancelado_por,
+                ':m': motivo,
+                ':p': 'PENDIENTE',
+                ':enc': 'EN_CAMINO',
+            },
         )
-        print("Estado de la moto actualizado a TRABAJANDO en DynamoDB")
-    
-    except Exception as e:
-        print(f"Error al actualizar el servicio en DynamoDB: {e}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': 'Error al actualizar el servicio'})
-        }
-    
-    transmission_payload = {
-        'action': 'servicioCompletado',
-        'serviceId': body["serviceId"],
-        'correoMoto': body["correoMoto"],
-        'usuarioId': body["usuarioId"],
-    }
-    
-    transmitir(event, transmission_payload)
-    print("Servicio completado transmitido exitosamente")
+    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        return _ws_error('El servicio ya cambió de estado. No se pudo cancelar.')
 
-    return {
-        'statusCode': 200,
-        'body': json.dumps({'message': 'Servicio completado registrado exitosamente'})
+    apigw = _get_apigw_client(event)
+
+    # Notificar a ambas partes
+    cancel_payload = {
+        'action': 'servicioCancelado',
+        'serviceId': service_id,
+        'estado': 'CANCELADO',
+        'canceladoPor': cancelado_por,
+        'motivo': motivo,
+        'message': f'Servicio cancelado por el {"pasajero" if es_usuario else "conductor"}.',
     }
+
+    if es_usuario and serv.get('driverId', 'NONE') != 'NONE':
+        _notify_driver(apigw, serv['driverId'], cancel_payload)
+    elif es_conductor:
+        _notify_user(apigw, serv.get('usuarioId', ''), cancel_payload)
+
+    # Confirmar al que canceló
+    conn_id = event['requestContext']['connectionId']
+    _send_to_connection(apigw, conn_id, cancel_payload)
+
+    return _ws_ok()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# registrarUbicacionMoto — Conductor envía su GPS en tiempo real
+# ═══════════════════════════════════════════════════════════════════════════════
+def registrar_ubicacion_moto(event, context):
+    """El conductor envía su ubicación GPS actual.
+    Vital para seguimiento en las calles empinadas y zonas rurales de Tarma.
+
+    Body esperado:
+    {
+      "action": "registrarUbicacionMoto",
+      "serviceId": "uuid",
+      "lat": -11.4198,
+      "lng": -75.6896
+    }
+    """
+    claims = _get_claims(event)
+    if not claims:
+        return _ws_error('No autenticado', 401)
+    if claims['rol'] != 'CONDUCTOR':
+        return _ws_error('Solo conductores pueden enviar ubicación', 403)
+
+    body = _parse_body(event)
+    service_id = body.get('serviceId')
+    lat = body.get('lat')
+    lng = body.get('lng')
+
+    if service_id is None or lat is None or lng is None:
+        return _ws_error('serviceId, lat y lng son requeridos')
+
+    ahora = datetime.now(ZONA_PERU).isoformat()
+    tabla = dynamodb.Table(SERVICIOS_TABLE)
+
+    # Actualizar ubicación del conductor en el servicio activo
+    try:
+        tabla.update_item(
+            Key={'serviceId': service_id},
+            UpdateExpression=(
+                'SET ubicacionConductor = :ub, actualizadoEn = :t'
+            ),
+            ConditionExpression='driverId = :d AND estado IN (:enc, :ec)',
+            ExpressionAttributeValues={
+                ':ub': {'lat': Decimal(str(lat)), 'lng': Decimal(str(lng))},
+                ':d': claims['sub'],
+                ':enc': 'EN_CAMINO',
+                ':ec': 'EN_CURSO',
+                ':t': ahora,
+            },
+        )
+    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        return _ws_error('No se puede actualizar ubicación. Verifica el servicio.')
+
+    # Obtener servicio para enviar ubicación al pasajero
+    serv = tabla.get_item(Key={'serviceId': service_id}).get('Item', {})
+    apigw = _get_apigw_client(event)
+
+    _notify_user(apigw, serv.get('usuarioId', ''), {
+        'action': 'ubicacionConductor',
+        'serviceId': service_id,
+        'lat': float(lat),
+        'lng': float(lng),
+        'timestamp': ahora,
+    })
+
+    return _ws_ok()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# informar — Mensajes genéricos entre pasajero y conductor
+# ═══════════════════════════════════════════════════════════════════════════════
+def informar(event, context):
+    """Envía un mensaje de texto entre pasajero y conductor durante un servicio activo.
+    Útil para indicaciones como "Estoy en la puerta azul" o "Espérame 1 minuto".
+
+    Body esperado:
+    {
+      "action": "informar",
+      "serviceId": "uuid",
+      "mensaje": "Estoy en la esquina de la iglesia"
+    }
+    """
+    claims = _get_claims(event)
+    if not claims:
+        return _ws_error('No autenticado', 401)
+
+    body = _parse_body(event)
+    service_id = body.get('serviceId')
+    mensaje = body.get('mensaje', '')
+
+    if not service_id or not mensaje:
+        return _ws_error('serviceId y mensaje son requeridos')
+
+    tabla = dynamodb.Table(SERVICIOS_TABLE)
+    result = tabla.get_item(Key={'serviceId': service_id})
+    if 'Item' not in result:
+        return _ws_error('Servicio no encontrado', 404)
+
+    serv = result['Item']
+    estado = serv.get('estado')
+    if estado not in ('PENDIENTE', 'EN_CAMINO', 'EN_CURSO'):
+        return _ws_error('El servicio ya no está activo')
+
+    es_usuario = serv.get('usuarioId') == claims['sub']
+    es_conductor = serv.get('driverId') == claims['sub']
+    if not es_usuario and not es_conductor:
+        return _ws_error('No perteneces a este servicio', 403)
+
+    apigw = _get_apigw_client(event)
+    ahora = datetime.now(ZONA_PERU).isoformat()
+
+    msg_payload = {
+        'action': 'mensajeRecibido',
+        'serviceId': service_id,
+        'de': claims.get('nombre', 'Desconocido'),
+        'rol': claims['rol'],
+        'mensaje': mensaje,
+        'timestamp': ahora,
+    }
+
+    # Enviar al otro participante
+    if es_usuario and serv.get('driverId', 'NONE') != 'NONE':
+        _notify_driver(apigw, serv['driverId'], msg_payload)
+    elif es_conductor:
+        _notify_user(apigw, serv.get('usuarioId', ''), msg_payload)
+
+    # Confirmar al remitente
+    conn_id = event['requestContext']['connectionId']
+    _send_to_connection(apigw, conn_id, {
+        'action': 'mensajeEnviado',
+        'serviceId': service_id,
+        'mensaje': mensaje,
+        'timestamp': ahora,
+    })
+
+    return _ws_ok()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ping — Heartbeat para mantener la conexión viva
+# ═══════════════════════════════════════════════════════════════════════════════
+def ping(event, context):
+    """Responde con pong. El frontend debe enviar ping cada 5 minutos
+    para mantener la conexión WebSocket activa (especialmente importante
+    en zonas con conectividad intermitente como las alturas de Tarma)."""
+    conn_id = event['requestContext']['connectionId']
+    apigw = _get_apigw_client(event)
+
+    # Renovar TTL de la conexión
+    tabla = dynamodb.Table(CONEXIONES_TABLE)
+    tabla.update_item(
+        Key={'connectionId': conn_id},
+        UpdateExpression='SET #ttl = :t',
+        ExpressionAttributeNames={'#ttl': 'ttl'},
+        ExpressionAttributeValues={':t': int(time.time()) + 86400},
+    )
+
+    _send_to_connection(apigw, conn_id, {
+        'action': 'pong',
+        'timestamp': datetime.now(ZONA_PERU).isoformat(),
+        'message': 'Conexión activa',
+    })
+
+    return _ws_ok()
