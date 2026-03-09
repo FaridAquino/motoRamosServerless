@@ -40,7 +40,7 @@ def registerUsuario(event, context):
     if not body:
         return error('Falta el body de la solicitud')
 
-    required = ['nombre', 'apellido','telefono', 'contrasena', 'telefono']
+    required = ['nombre', 'apellido','telefono', 'contrasena']
     missing = [f for f in required if f not in body or not body[f]]
     if missing:
         return error(f'Campos requeridos faltantes: {", ".join(missing)}')
