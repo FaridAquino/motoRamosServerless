@@ -1,269 +1,406 @@
+"""
+MotoRamos — Microservicio de Conductores
+REST API: Registro, Login, Perfil, Historial, Toggle-activo, Foto S3, Calificar usuario.
+
+Diseñado para los conductores de mototaxi de Tarma, Junín.
+Todas las contraseñas se almacenan con PBKDF2-SHA256 (600 000 iteraciones).
+Cada respuesta incluye headers CORS para integración con Flutter.
+"""
+
 import json
-import hmac
 import os
-import boto3
-import hashlib
 import uuid
+import boto3
 from decimal import Decimal
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from boto3.dynamodb.conditions import Key
 
-MOTOS_TABLE= os.environ["motosTable"]
-CONDUCTORES_TABLE= os.environ["conductoresTable"]
-USUARIOS_TABLE= os.environ["usuariosTable"]
-SERVICIOS_TABLE= os.environ["serviciosTable"]
-UBICACIONES_MOTOS_TABLE= os.environ["ubicacionesMotosTable"]
+from auth_utils import (
+    generate_jwt, hash_password, verify_password,
+    success, error, require_auth, extract_body,
+)
 
+# ─── Tablas y recursos ──────────────────────────────────────────────────────
+CONDUCTORES_TABLE = os.environ['conductoresTable']
+SERVICIOS_TABLE = os.environ['serviciosTable']
+USUARIOS_TABLE = os.environ['usuariosTable']
+FOTOS_BUCKET = os.environ.get('fotosBucket', '')
+
+dynamodb = boto3.resource('dynamodb')
+ZONA_PERU = ZoneInfo('America/Lima')
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /registerConductor  (público)
+# ═══════════════════════════════════════════════════════════════════════════════
 def registerConductor(event, context):
-    try:
-        if 'body' not in event or event['body'] is None:
-            return {'statusCode': 400, 'body': json.dumps({'error': 'Falta el body'})}
+    """Registra un nuevo conductor de mototaxi. Devuelve token JWT."""
+    body = extract_body(event)
+    if not body:
+        return error('Falta el body de la solicitud')
 
-        body = json.loads(event['body'])
+    required = ['nombre', 'apellido', 'correo', 'contrasena', 'telefono', 'placa']
+    missing = [f for f in required if f not in body or not body[f]]
+    if missing:
+        return error(f'Campos requeridos faltantes: {", ".join(missing)}')
 
-        nombre = body['nombre']
-        edad = body['edad']
-        correo = body['correo']
-        contrasena = body["contrasena"]
+    tabla = dynamodb.Table(CONDUCTORES_TABLE)
 
-        # Hashing de la contraseña
-        salt = os.urandom(16)
-        hash_bytes = hashlib.pbkdf2_hmac(
-            'sha256', 
-            contrasena.encode('utf-8'), 
-            salt, 
-            600000
-        )
+    # Verificar correo duplicado
+    dup = tabla.query(
+        IndexName='CorreoIndex',
+        KeyConditionExpression=Key('correo').eq(body['correo']),
+        Select='COUNT',
+    )
+    if dup['Count'] > 0:
+        return error('Ya existe un conductor registrado con ese correo', 409)
 
-        contrasena_hash = salt.hex() + ":" + hash_bytes.hex()
+    # Verificar placa duplicada
+    dup_placa = tabla.query(
+        IndexName='PlacaIndex',
+        KeyConditionExpression=Key('placa').eq(body['placa'].upper()),
+        Select='COUNT',
+    )
+    if dup_placa['Count'] > 0:
+        return error('Ya existe un conductor registrado con esa placa', 409)
 
-        conductores_Table = boto3.resource('dynamodb').Table(CONDUCTORES_TABLE)
-        
-        conductor_Json = {
-            'driverId': str(uuid.uuid4()),
-            'correo': correo,
-            'nombre': nombre,
-            'edad': Decimal(str(edad)),
-            'contrasenaHasheada': contrasena_hash
-        }
-        
-        conductores_Table.put_item(Item=conductor_Json)
-        
-        return {
-            'statusCode': 200,
-            'body': json.dumps({'message': 'Conductor registrado exitosamente'})
-        }
+    ahora = datetime.now(ZONA_PERU).isoformat()
+    driver_id = str(uuid.uuid4())
 
-    except KeyError as e:
-        return {'statusCode': 400, 'body': json.dumps({'error': f'Falta el campo: {str(e)}'})}
-    except Exception as e:
-        print(e)
-        return {'statusCode': 500, 'body': json.dumps({'error': str(e)})}
+    item = {
+        'driverId': driver_id,
+        'nombre': body['nombre'],
+        'apellido': body['apellido'],
+        'correo': body['correo'],
+        'telefono': body['telefono'],
+        'placa': body['placa'].upper(),
+        'contrasenaHasheada': hash_password(body['contrasena']),
+        'fotoUrl': '',
+        'marca': body.get('marca', ''),
+        'color': body.get('color', ''),
+        'sumaCalificaciones': Decimal('0'),
+        'totalCalificaciones': Decimal('0'),
+        'activo': False,         # Inicia como NO disponible
+        'autorizadoPorAdmin': False,
+        'creadoEn': ahora,
+    }
 
+    tabla.put_item(Item=item)
+
+    token = generate_jwt({
+        'sub': driver_id,
+        'correo': body['correo'],
+        'rol': 'CONDUCTOR',
+        'nombre': body['nombre'],
+    })
+
+    return success({
+        'message': 'Conductor registrado exitosamente. Esperando autorización del admin.',
+        'driverId': driver_id,
+        'token': token,
+    }, 201)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /loginConductor  (público)
+# ═══════════════════════════════════════════════════════════════════════════════
 def loginConductor(event, context):
-    try:
-        if 'body' not in event or event['body'] is None:
-            return {'statusCode': 400, 'body': json.dumps({'error': 'Falta el body'})}
+    """Login de conductor. Devuelve token JWT firmado."""
+    body = extract_body(event)
+    if not body:
+        return error('Falta el body de la solicitud')
 
-        body = json.loads(event['body'])
+    correo = body.get('correo')
+    contrasena = body.get('contrasena')
+    if not correo or not contrasena:
+        return error('Correo y contraseña son requeridos')
 
-        correo = body['correo']
-        contrasena = body["contrasena"]
+    tabla = dynamodb.Table(CONDUCTORES_TABLE)
+    result = tabla.query(
+        IndexName='CorreoIndex',
+        KeyConditionExpression=Key('correo').eq(correo),
+    )
+    items = result.get('Items', [])
+    if not items:
+        return error('Conductor no encontrado', 404)
 
-        conductores_Table = boto3.resource('dynamodb').Table(CONDUCTORES_TABLE)
-        
-        response = conductores_Table.query(
-            IndexName='CorreoIndex',
-            KeyConditionExpression=Key('correo').eq(correo)
+    conductor = items[0]
+
+    if not verify_password(contrasena, conductor.get('contrasenaHasheada', '')):
+        return error('Contraseña incorrecta', 401)
+
+    token = generate_jwt({
+        'sub': conductor['driverId'],
+        'correo': correo,
+        'rol': 'CONDUCTOR',
+        'nombre': conductor.get('nombre', ''),
+    })
+
+    return success({
+        'message': 'Login exitoso',
+        'driverId': conductor['driverId'],
+        'nombre': conductor.get('nombre'),
+        'apellido': conductor.get('apellido'),
+        'activo': conductor.get('activo', False),
+        'autorizadoPorAdmin': conductor.get('autorizadoPorAdmin', False),
+        'token': token,
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GET /perfil  (auth — CONDUCTOR)
+# ═══════════════════════════════════════════════════════════════════════════════
+@require_auth
+def getPerfilConductor(event, context):
+    """Devuelve el perfil del conductor autenticado (sin contraseña)."""
+    claims = event['authClaims']
+    tabla = dynamodb.Table(CONDUCTORES_TABLE)
+    result = tabla.get_item(Key={'driverId': claims['sub']})
+    if 'Item' not in result:
+        return error('Conductor no encontrado', 404)
+
+    c = result['Item']
+    c.pop('contrasenaHasheada', None)
+
+    # Calcular promedio de calificación
+    total = int(c.get('totalCalificaciones', 0))
+    if total > 0:
+        c['calificacionPromedio'] = round(
+            float(c.get('sumaCalificaciones', 0)) / total, 2
         )
-        
-        items = response.get('Items', [])
-        
-        if len(items) == 0:
-            return {
-                'statusCode': 404,
-                'body': json.dumps({'error': 'Conductor no encontrado'})
-            }
+    else:
+        c['calificacionPromedio'] = 5.0
 
-        conductor_encontrado = items[0]
+    return success({'conductor': c})
 
-        contrasena_guardada = conductor_encontrado['contrasenaHasheada']
-        
-        try:
-            salt_hex, hash_real_hex = contrasena_guardada.split(":")
-        except ValueError:
-            return {'statusCode': 500, 'body': json.dumps({'error': 'Error en datos de usuario'})}
 
-        salt_bytes = bytes.fromhex(salt_hex)
+# ═══════════════════════════════════════════════════════════════════════════════
+# PUT /perfil  (auth — CONDUCTOR)
+# ═══════════════════════════════════════════════════════════════════════════════
+@require_auth
+def updatePerfilConductor(event, context):
+    """Actualiza nombre, apellido, teléfono, placa, marca o color del conductor."""
+    claims = event['authClaims']
+    body = extract_body(event)
+    if not body:
+        return error('Falta el body')
 
-        hash_intento = hashlib.pbkdf2_hmac(
-            'sha256',
-            contrasena.encode('utf-8'),
-            salt_bytes,
-            600000
-        )
+    allowed = ['nombre', 'apellido', 'telefono', 'placa', 'marca', 'color']
+    expr_parts, values, names = [], {}, {}
 
-        hash_real_bytes = bytes.fromhex(hash_real_hex)
-        
-        if hmac.compare_digest(hash_intento, hash_real_bytes):
-            return {
-                'statusCode': 200,
-                'body': json.dumps({'message': 'Login exitoso,', 'driverId': conductor_encontrado['driverId']})
-            }
-        else:
-            return {
-                'statusCode': 401,
-                'body': json.dumps({'error': 'Contraseña incorrecta'})
-            }
+    for campo in allowed:
+        if campo in body:
+            safe = f'#a_{campo}'
+            placeholder = f':v_{campo}'
+            expr_parts.append(f'{safe} = {placeholder}')
+            val = body[campo]
+            if campo == 'placa':
+                val = val.upper()
+            values[placeholder] = val
+            names[safe] = campo
 
-    except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': str(e)})
-        }
+    if not expr_parts:
+        return error('No se proporcionaron campos para actualizar')
 
-    except KeyError as e:
-        return {'statusCode': 400, 'body': json.dumps({'error': f'Falta el campo: {str(e)}'})}
-    except Exception as e:
-        print(e)
-        return {'statusCode': 500, 'body': json.dumps({'error': str(e)})}
+    tabla = dynamodb.Table(CONDUCTORES_TABLE)
+    tabla.update_item(
+        Key={'driverId': claims['sub']},
+        UpdateExpression='SET ' + ', '.join(expr_parts),
+        ExpressionAttributeValues=values,
+        ExpressionAttributeNames=names,
+    )
 
-def registrarMoto(event, context):
-    try:
-        if 'body' not in event or event['body'] is None:
-            return {'statusCode': 400, 'body': json.dumps({'error': 'Falta el body'})}
+    return success({'message': 'Perfil actualizado exitosamente'})
 
-        body = json.loads(event['body'])
 
-        driverId = body['driverId']
-        placa = body['placa']
-        color = body['color']
-        empresa= body['empresa']
-        correo_Conductor = body['correoConductor']
+# ═══════════════════════════════════════════════════════════════════════════════
+# GET /perfil/foto-url  (auth) — URL pre-firmada para subir foto a S3
+# ═══════════════════════════════════════════════════════════════════════════════
+@require_auth
+def getPresignedUploadUrl(event, context):
+    """Genera una URL pre-firmada PUT para que el conductor suba su foto a S3."""
+    if not FOTOS_BUCKET:
+        return error('Servicio de fotos no configurado', 503)
 
-        motos_Table = boto3.resource('dynamodb').Table(MOTOS_TABLE)
-        conductores_table=boto3.resource('dynamodb').Table(CONDUCTORES_TABLE)
+    claims = event['authClaims']
+    s3 = boto3.client('s3')
+    key = f"conductores/{claims['sub']}/foto.jpg"
 
-        moto_Json = {
-            'motoId': str(uuid.uuid4()),
-            'estado': 'NO_TRABAJANDO',
-            'correoConductor': correo_Conductor,
-            'placa': placa,
-            'empresa': empresa,
-            'color': color
-        }
-        
-        response_update = conductores_table.update_item(
-            Key={
-                'driverId': driverId
-            },
-            UpdateExpression="SET motos = list_append(if_not_exists(motos, :empty_list), :moto)",
+    upload_url = s3.generate_presigned_url(
+        'put_object',
+        Params={'Bucket': FOTOS_BUCKET, 'Key': key, 'ContentType': 'image/jpeg'},
+        ExpiresIn=300,
+    )
+    foto_url = f"https://{FOTOS_BUCKET}.s3.amazonaws.com/{key}"
+
+    # Guardar la URL de la foto en el perfil
+    tabla = dynamodb.Table(CONDUCTORES_TABLE)
+    tabla.update_item(
+        Key={'driverId': claims['sub']},
+        UpdateExpression='SET fotoUrl = :u',
+        ExpressionAttributeValues={':u': foto_url},
+    )
+
+    return success({'uploadUrl': upload_url, 'fotoUrl': foto_url})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PUT /toggle-activo  (auth) — Conductor se pone en línea / fuera de línea
+# ═══════════════════════════════════════════════════════════════════════════════
+@require_auth
+def toggleActivo(event, context):
+    """Activa o desactiva la disponibilidad del conductor.
+    En Tarma es clave: un conductor que baja a descansar a Acobamba
+    marca su estado como inactivo para no recibir pedidos."""
+    claims = event['authClaims']
+    body = extract_body(event)
+    if not body or 'activo' not in body:
+        return error('Campo "activo" (true/false) es requerido')
+
+    nuevo_estado = bool(body['activo'])
+    tabla = dynamodb.Table(CONDUCTORES_TABLE)
+
+    # Verificar autorización del admin
+    res = tabla.get_item(Key={'driverId': claims['sub']}, ProjectionExpression='autorizadoPorAdmin')
+    if 'Item' not in res:
+        return error('Conductor no encontrado', 404)
+    if not res['Item'].get('autorizadoPorAdmin', False):
+        return error('Tu cuenta aún no ha sido autorizada por un administrador', 403)
+
+    tabla.update_item(
+        Key={'driverId': claims['sub']},
+        UpdateExpression='SET activo = :a',
+        ExpressionAttributeValues={':a': nuevo_estado},
+    )
+
+    return success({
+        'message': f'Estado actualizado: {"EN LÍNEA" if nuevo_estado else "FUERA DE LÍNEA"}',
+        'activo': nuevo_estado,
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GET /historial  (auth) — Viajes pasados del conductor
+# ═══════════════════════════════════════════════════════════════════════════════
+@require_auth
+def getHistorialConductor(event, context):
+    """Consulta servicios pasados del conductor. Filtros opcionales: ?desde=&hasta=&limit=."""
+    claims = event['authClaims']
+    params = event.get('queryStringParameters') or {}
+
+    tabla = dynamodb.Table(SERVICIOS_TABLE)
+    key_cond = Key('driverId').eq(claims['sub'])
+
+    if 'desde' in params and 'hasta' in params:
+        key_cond = key_cond & Key('creadoEn').between(params['desde'], params['hasta'])
+    elif 'desde' in params:
+        key_cond = key_cond & Key('creadoEn').gte(params['desde'])
+
+    result = tabla.query(
+        IndexName='ConductorFechaIndex',
+        KeyConditionExpression=key_cond,
+        ScanIndexForward=False,  # Más recientes primero
+        Limit=int(params.get('limit', '20')),
+    )
+
+    return success({
+        'servicios': result.get('Items', []),
+        'count': result.get('Count', 0),
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /calificar  (auth — CONDUCTOR califica al USUARIO)
+# ═══════════════════════════════════════════════════════════════════════════════
+@require_auth
+def calificarUsuario(event, context):
+    """Registra una calificación (1-5 estrellas) del conductor al usuario."""
+    claims = event['authClaims']
+    body = extract_body(event)
+    if not body:
+        return error('Falta el body')
+
+    service_id = body.get('serviceId')
+    puntuacion = body.get('puntuacion')
+    comentario = body.get('comentario', '')
+
+    if not service_id:
+        return error('serviceId es requerido')
+    if not isinstance(puntuacion, (int, float)) or not (1 <= puntuacion <= 5):
+        return error('La puntuación debe ser un número entre 1 y 5')
+
+    tabla_serv = dynamodb.Table(SERVICIOS_TABLE)
+    result = tabla_serv.get_item(Key={'serviceId': service_id})
+    if 'Item' not in result:
+        return error('Servicio no encontrado', 404)
+
+    serv = result['Item']
+    if serv.get('driverId') != claims['sub']:
+        return error('No autorizado para calificar este servicio', 403)
+    if serv.get('estado') != 'COMPLETADO':
+        return error('Solo se pueden calificar servicios completados')
+    if serv.get('calificacionConductor') is not None:
+        return error('Ya calificaste este servicio')
+
+    # Guardar calificación en el servicio
+    tabla_serv.update_item(
+        Key={'serviceId': service_id},
+        UpdateExpression='SET calificacionConductor = :c, comentarioConductor = :m',
+        ExpressionAttributeValues={
+            ':c': Decimal(str(puntuacion)),
+            ':m': comentario,
+        },
+    )
+
+    # Actualizar suma y conteo del usuario (operación atómica con ADD)
+    user_id = serv.get('usuarioId')
+    if user_id:
+        tabla_usr = dynamodb.Table(USUARIOS_TABLE)
+        tabla_usr.update_item(
+            Key={'userId': user_id},
+            UpdateExpression='ADD sumaCalificaciones :c, totalCalificaciones :uno',
             ExpressionAttributeValues={
-                ':empty_list': [],
-                ':moto': [placa]
+                ':c': Decimal(str(puntuacion)),
+                ':uno': Decimal('1'),
             },
-            ReturnValues="UPDATED_NEW"
-        )
-        print("Moto agregada a conductor: ", response_update.get('Attributes'))
-        
-        motos_Table.put_item(Item=moto_Json)
-
-        print("Moto registraad: ", moto_Json)
-        
-        return {
-            'statusCode': 200,
-            'body': json.dumps({'message': 'Moto registrada exitosamente al conductor'})
-        }
-
-    except KeyError as e:
-        return {'statusCode': 400, 'body': json.dumps({'error': f'Falta el campo: {str(e)}'})}
-    except Exception as e:
-        print(e)
-        return {'statusCode': 500, 'body': json.dumps({'error': str(e)})}
-
-def recorridoIniciado(event, context):
-    try:
-        if 'body' not in event or event['body'] is None:
-            return {'statusCode': 400, 'body': json.dumps({'error': 'Falta el body'})}
-
-        body = json.loads(event['body'])
-
-        moto_Id= body['motoId']
-
-        motos_Table=boto3.resource('dynamodb').Table(MOTOS_TABLE)
-        response= motos_Table.get_item(Key={'motoId': moto_Id})
-
-        if 'Item' not in response:
-            return {
-                'statusCode': 404,
-                'body': json.dumps({'error': 'Moto no encontrada'})
-            }
-
-        update_response = motos_Table.update_item(
-            Key={
-                'motoId': moto_Id
-            },
-            UpdateExpression="set estado = :e",
-            ExpressionAttributeValues={
-                ':e': 'TRABAJANDO'
-            },
-            ReturnValues="UPDATED_NEW"
         )
 
-        print("UpdateItem succeeded: ", update_response.get('Attributes'))
+    return success({'message': 'Calificación registrada exitosamente'})
 
-        return {
-            'statusCode': 200, 
-            'body': json.dumps({
-                'message': 'Estado actualizado a "TRABAJANDO" correctamente',
-                'updatedAttributes': update_response.get('Attributes')
-            })
-        }
-    except KeyError as e:
-        return {'statusCode': 400, 'body': json.dumps({'error': f'Falta el campo: {str(e)}'})}
-    except Exception as e:
-        print(e)
-        return {'statusCode': 500, 'body': json.dumps({'error': str(e)})}
 
-def recorridoTerminado(event,context):
-    try:
-        if 'body' not in event or event['body'] is None:
-            return {'statusCode': 400, 'body': json.dumps({'error': 'Falta el body'})}
+# ═══════════════════════════════════════════════════════════════════════════════
+# GET /ganancias  (auth) — Resumen de ganancias del conductor
+# ═══════════════════════════════════════════════════════════════════════════════
+@require_auth
+def getGananciasConductor(event, context):
+    """Devuelve resumen de ganancias: hoy, esta semana, este mes.
+    Útil para conductores tarmeños que necesitan calcular sus ingresos diarios."""
+    claims = event['authClaims']
+    params = event.get('queryStringParameters') or {}
 
-        body = json.loads(event['body'])
+    ahora = datetime.now(ZONA_PERU)
+    desde = params.get('desde', ahora.strftime('%Y-%m-%d') + 'T00:00:00')
+    hasta = params.get('hasta', ahora.isoformat())
 
-        moto_Id= body['motoId']
+    tabla = dynamodb.Table(SERVICIOS_TABLE)
+    result = tabla.query(
+        IndexName='ConductorFechaIndex',
+        KeyConditionExpression=(
+            Key('driverId').eq(claims['sub']) &
+            Key('creadoEn').between(desde, hasta)
+        ),
+        FilterExpression='estado = :e',
+        ExpressionAttributeValues={':e': 'COMPLETADO'},
+    )
 
-        motos_Table=boto3.resource('dynamodb').Table(MOTOS_TABLE)
-        response= motos_Table.get_item(Key={'motoId': moto_Id})
+    servicios = result.get('Items', [])
+    total = sum(float(s.get('precio', 0)) for s in servicios)
 
-        if 'Item' not in response:
-            return {
-                'statusCode': 404,
-                'body': json.dumps({'error': 'Moto no encontrada'})
-            }
-
-        update_response = motos_Table.update_item(
-            Key={
-                'motoId': moto_Id
-            },
-            UpdateExpression="set estado = :e",
-            ExpressionAttributeValues={
-                ':e': 'NO_TRABAJANDO'
-            },
-            ReturnValues="UPDATED_NEW"
-        )
-
-        print("UpdateItem succeeded: ", update_response.get('Attributes'))
-
-        return {
-            'statusCode': 200, 
-            'body': json.dumps({
-                'message': 'Estado actualizado a "NO_TRABAJANDO" correctamente',
-                'updatedAttributes': update_response.get('Attributes')
-            })
-        }
-    except KeyError as e:
-        return {'statusCode': 400, 'body': json.dumps({'error': f'Falta el campo: {str(e)}'})}
-    except Exception as e:
-        print(e)
-        return {'statusCode': 500, 'body': json.dumps({'error': str(e)})}
+    return success({
+        'desde': desde,
+        'hasta': hasta,
+        'totalServicios': len(servicios),
+        'totalGanancia': round(total, 2),
+        'servicios': servicios,
+    })

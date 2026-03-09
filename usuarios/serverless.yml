@@ -6,35 +6,50 @@ provider:
   timeout: 29
   region: us-east-1
   stage: dev
-  
+
   iam:
     role:
       statements:
         - Effect: Allow
           Action:
-            - dynamodb:*
-            - lambda:*
-          Resource: 
-            - "arn:aws:dynamodb:*:092671055435:table/*"
-            - "arn:aws:lambda:*:092671055435:function:*"
+            - dynamodb:PutItem
+            - dynamodb:GetItem
+            - dynamodb:DeleteItem
+            - dynamodb:UpdateItem
+            - dynamodb:Query
+            - dynamodb:Scan
+          Resource:
+            - "arn:aws:dynamodb:us-east-1:*:table/usuarios"
+            - "arn:aws:dynamodb:us-east-1:*:table/usuarios/index/*"
+            - "arn:aws:dynamodb:us-east-1:*:table/servicios"
+            - "arn:aws:dynamodb:us-east-1:*:table/servicios/index/*"
+            - "arn:aws:dynamodb:us-east-1:*:table/conductores"
+            - "arn:aws:dynamodb:us-east-1:*:table/conductores/index/*"
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+          Resource:
+            - "arn:aws:s3:::motoramos-fotos-${self:provider.stage}/*"
 
   environment:
-    motosTable: motos
-    conductoresTable: conductores
     usuariosTable: usuarios
+    conductoresTable: conductores
     serviciosTable: servicios
-    ubicacionesMotosTable: ubicaciones_motos
+    fotosBucket: motoramos-fotos-${self:provider.stage}
+    JWT_SECRET: ${env:JWT_SECRET, 'motoRamos-tarma-jwt-secret-utec-2026'}
 
 package:
   patterns:
-    - '!node_modules/**'       # Ignorar carpeta de node
-    - '!.serverless/**'        # Ignorar carpeta oculta de despliegue
-    - '!venv/**'               # Ignorar entorno virtual (si tienes uno)
-    - '!__pycache__/**'        # Ignorar archivos compilados de python
+    - '!node_modules/**'
+    - '!.serverless/**'
+    - '!venv/**'
+    - '!__pycache__/**'
     - '!package-lock.json'
-    - ./** # Incluir todo lo demás (tu código + librerías instaladas)
-  
+    - ./**
+
 functions:
+  # ── Públicos (sin JWT) ──
   RegisterUsuario:
     handler: handler.registerUsuario
     events:
@@ -42,7 +57,7 @@ functions:
           path: /registerUsuario
           method: post
           cors: true
-  
+
   LoginUsuario:
     handler: handler.loginUsuario
     events:
@@ -51,3 +66,43 @@ functions:
           method: post
           cors: true
 
+  # ── Protegidos (requieren JWT) ──
+  GetPerfilUsuario:
+    handler: handler.getPerfilUsuario
+    events:
+      - http:
+          path: /perfil
+          method: get
+          cors: true
+
+  UpdatePerfilUsuario:
+    handler: handler.updatePerfilUsuario
+    events:
+      - http:
+          path: /perfil
+          method: put
+          cors: true
+
+  GetPresignedUploadUrl:
+    handler: handler.getPresignedUploadUrl
+    events:
+      - http:
+          path: /perfil/foto-url
+          method: get
+          cors: true
+
+  GetHistorialUsuario:
+    handler: handler.getHistorialUsuario
+    events:
+      - http:
+          path: /historial
+          method: get
+          cors: true
+
+  CalificarConductor:
+    handler: handler.calificarConductor
+    events:
+      - http:
+          path: /calificar
+          method: post
+          cors: true

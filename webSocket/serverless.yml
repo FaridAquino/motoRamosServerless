@@ -1,4 +1,4 @@
-service: websocket-motoRamos
+service: ws-motoRamos
 
 provider:
   name: aws
@@ -6,124 +6,117 @@ provider:
   timeout: 29
   region: us-east-1
   stage: dev
-  
+
   iam:
     role:
       statements:
         - Effect: Allow
           Action:
-            - dynamodb:*
-            - lambda:*
-          Resource: 
-            - "arn:aws:dynamodb:*:092671055435:table/*"
-            - "arn:aws:lambda:*:092671055435:function:*"
-
-  websocketsApiName: websocket-motoRamos-${self:provider.stage}
-  websocketsApiRouteSelectionExpression: $request.body.action
+            - dynamodb:PutItem
+            - dynamodb:GetItem
+            - dynamodb:DeleteItem
+            - dynamodb:UpdateItem
+            - dynamodb:Query
+            - dynamodb:Scan
+          Resource:
+            - "arn:aws:dynamodb:us-east-1:*:table/conexiones"
+            - "arn:aws:dynamodb:us-east-1:*:table/conexiones/index/*"
+            - "arn:aws:dynamodb:us-east-1:*:table/servicios"
+            - "arn:aws:dynamodb:us-east-1:*:table/servicios/index/*"
+            - "arn:aws:dynamodb:us-east-1:*:table/conductores"
+            - "arn:aws:dynamodb:us-east-1:*:table/conductores/index/*"
+            - "arn:aws:dynamodb:us-east-1:*:table/usuarios"
+            - "arn:aws:dynamodb:us-east-1:*:table/usuarios/index/*"
+        - Effect: Allow
+          Action:
+            - execute-api:ManageConnections
+          Resource:
+            - "arn:aws:execute-api:us-east-1:*:*/@connections/*"
 
   environment:
-    connectionsTable: ${self:custom.connectionsTable}
-    motosTable: motos
+    conexionesTable: conexiones
+    serviciosTable: servicios
     conductoresTable: conductores
     usuariosTable: usuarios
-    serviciosTable: servicios
-    ubicacionesMotosTable: ubicaciones_motos
+    JWT_SECRET: ${env:JWT_SECRET, 'motoRamos-tarma-jwt-secret-utec-2026'}
 
 package:
   patterns:
-    - '!node_modules/**'       # Ignorar carpeta de node
-    - '!.serverless/**'        # Ignorar carpeta oculta de despliegue
-    - '!venv/**'               # Ignorar entorno virtual (si tienes uno)
-    - '!__pycache__/**'        # Ignorar archivos compilados de python
+    - '!node_modules/**'
+    - '!.serverless/**'
+    - '!venv/**'
+    - '!__pycache__/**'
     - '!package-lock.json'
-    - ./** # Incluir todo lo demás (tu código + librerías instaladas)
+    - ./**
 
-
-custom:
-  connectionsTable: connections
-  
 functions:
-  ConnectionHandler:
-    handler: handler.connectionManager
+  # ── Conexión / Desconexión ──
+  Connect:
+    handler: handler.connect
     events:
       - websocket:
           route: $connect
+
+  Disconnect:
+    handler: handler.disconnect
+    events:
       - websocket:
           route: $disconnect
 
-  DefaultHandler:
-    handler: handler.defaultHandler
-    events:
-      - websocket: $default
-  
-  RegistrarUbicacionMoto:
-    handler: handler.registrarUbicacionMoto
+  Default:
+    handler: handler.default_handler
     events:
       - websocket:
-          route: registrarUbicacionMoto
-  
-  RegistrarServicioRequerido:
-    handler: handler.registrarServicio
+          route: $default
+
+  # ── Acciones del Pasajero ──
+  ServicioRequerido:
+    handler: handler.servicio_requerido
     events:
       - websocket:
-          route: registrarServicio
-  
+          route: servicioRequerido
+
+  CancelarServicio:
+    handler: handler.cancelar_servicio
+    events:
+      - websocket:
+          route: cancelarServicio
+
+  # ── Acciones del Conductor ──
   AceptarServicio:
-    handler: handler.aceptarServicio
+    handler: handler.aceptar_servicio
     events:
       - websocket:
           route: aceptarServicio
 
-  CompletarServicio:
-    handler: handler.completarServicio
+  IniciarViaje:
+    handler: handler.iniciar_viaje
     events:
       - websocket:
-          route: completarServicio
-  
+          route: iniciarViaje
+
+  CompletarViaje:
+    handler: handler.completar_viaje
+    events:
+      - websocket:
+          route: completarViaje
+
+  RegistrarUbicacionMoto:
+    handler: handler.registrar_ubicacion_moto
+    events:
+      - websocket:
+          route: registrarUbicacionMoto
+
+  # ── Comunicación ──
   Informar:
     handler: handler.informar
     events:
       - websocket:
           route: informar
-  
-  Transmitir:
-    handler: handler.transmitir
+
+  # ── Heartbeat ──
+  Ping:
+    handler: handler.ping
     events:
       - websocket:
-          route: transmitir
-
-resources:
-  Resources:
-    ConnectionsTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:custom.connectionsTable}
-        BillingMode: PAY_PER_REQUEST
-
-        AttributeDefinitions:
-          - AttributeName: connectionId
-            AttributeType: S
-          - AttributeName: rol
-            AttributeType: S
-          - AttributeName: userId
-            AttributeType: S
-
-        KeySchema:
-          - AttributeName: connectionId
-            KeyType: HASH
-        
-        GlobalSecondaryIndexes:
-          - IndexName: RolIndex
-            KeySchema:
-              - AttributeName: rol
-                KeyType: HASH
-            Projection:
-              ProjectionType: ALL
-              
-          - IndexName: UserIdIndex
-            KeySchema:
-              - AttributeName: userId
-                KeyType: HASH
-            Projection:
-              ProjectionType: ALL
-        
+          route: ping

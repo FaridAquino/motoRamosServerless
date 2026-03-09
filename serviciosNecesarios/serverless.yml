@@ -1,166 +1,188 @@
-service: serviciosNecesarios
+service: infra-motoRamos
 
 provider:
   name: aws
-  runtime: python3.12
-  timeout: 29
   region: us-east-1
   stage: dev
-  
-  iam:
-    role:
-      statements:
-        - Effect: Allow
-          Action:
-            - dynamodb:*
-            - lambda:*
-          Resource: 
-            - "arn:aws:dynamodb:*:092671055435:table/*"
-            - "arn:aws:lambda:*:092671055435:function:*"
-
-package:
-  patterns:
-    - '!node_modules/**'       # Ignorar carpeta de node
-    - '!.serverless/**'        # Ignorar carpeta oculta de despliegue
-    - '!venv/**'               # Ignorar entorno virtual (si tienes uno)
-    - '!__pycache__/**'        # Ignorar archivos compilados de python
-    - '!package-lock.json'
-    - ./**
-
-custom:
-  motosTable: motos
-  conductoresTable: conductores
-  usuariosTable: usuarios
-  serviciosTable: servicios
-  ubicacionesMotosTable: ubicaciones_motos
 
 resources:
   Resources:
-    MotosTable:
+    # ═══════════════════════════════════════════════════════════════════
+    # Tabla: usuarios (pasajeros de Tarma)
+    # ═══════════════════════════════════════════════════════════════════
+    UsuariosTable:
       Type: AWS::DynamoDB::Table
       Properties:
-        TableName: ${self:custom.motosTable}
+        TableName: usuarios
         BillingMode: PAY_PER_REQUEST
-        
         AttributeDefinitions:
-          - AttributeName: motoId
+          - AttributeName: userId
             AttributeType: S
-
-          - AttributeName: estado
+          - AttributeName: correo
             AttributeType: S
-          
-          - AttributeName: placa
-            AttributeType: S
-
         KeySchema:
-          - AttributeName: motoId
+          - AttributeName: userId
             KeyType: HASH
-
         GlobalSecondaryIndexes:
-          - IndexName: EstadoIndex
+          - IndexName: CorreoIndex
             KeySchema:
-              - AttributeName: estado
+              - AttributeName: correo
                 KeyType: HASH
             Projection:
               ProjectionType: ALL
-          
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Tabla: conductores (mototaxistas de Tarma)
+    # ═══════════════════════════════════════════════════════════════════
+    ConductoresTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: conductores
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: driverId
+            AttributeType: S
+          - AttributeName: correo
+            AttributeType: S
+          - AttributeName: placa
+            AttributeType: S
+        KeySchema:
+          - AttributeName: driverId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: CorreoIndex
+            KeySchema:
+              - AttributeName: correo
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
           - IndexName: PlacaIndex
             KeySchema:
               - AttributeName: placa
                 KeyType: HASH
             Projection:
-              ProjectionType: ALL
-        
-    ConductoresTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:custom.conductoresTable}
-        BillingMode: PAY_PER_REQUEST
-    
-        AttributeDefinitions:
-          - AttributeName: driverId
-            AttributeType: S
+              ProjectionType: KEYS_ONLY
 
-          - AttributeName: correo
-            AttributeType: S
-          
-        KeySchema:
-          - AttributeName: driverId
-            KeyType: HASH
-
-        GlobalSecondaryIndexes:
-          - IndexName: CorreoIndex
-            KeySchema:
-              - AttributeName: correo
-                KeyType: HASH
-            Projection:
-              ProjectionType: ALL    
-        
-    UsuariosTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:custom.usuariosTable}
-        BillingMode: PAY_PER_REQUEST
-    
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-          - AttributeName: correo
-            AttributeType: S
-        KeySchema:
-          - AttributeName: userId
-            KeyType: HASH
-        
-        GlobalSecondaryIndexes:
-          - IndexName: CorreoIndex
-            KeySchema:
-              - AttributeName: correo
-                KeyType: HASH
-            Projection:
-              ProjectionType: ALL
-
+    # ═══════════════════════════════════════════════════════════════════
+    # Tabla: servicios (viajes / carreras)
+    # ═══════════════════════════════════════════════════════════════════
     ServiciosTable:
       Type: AWS::DynamoDB::Table
       Properties:
-        TableName: ${self:custom.serviciosTable}
+        TableName: servicios
         BillingMode: PAY_PER_REQUEST
-
         AttributeDefinitions:
           - AttributeName: serviceId
             AttributeType: S
-          
+          - AttributeName: usuarioId
+            AttributeType: S
+          - AttributeName: driverId
+            AttributeType: S
           - AttributeName: estado
             AttributeType: S
-
+          - AttributeName: creadoEn
+            AttributeType: S
         KeySchema:
           - AttributeName: serviceId
             KeyType: HASH
-        
         GlobalSecondaryIndexes:
-          - IndexName: EstadoIndex
+          # Historial del pasajero ordenado por fecha
+          - IndexName: UsuarioFechaIndex
             KeySchema:
+              - AttributeName: usuarioId
+                KeyType: HASH
+              - AttributeName: creadoEn
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+          # Historial del conductor ordenado por fecha
+          - IndexName: ConductorFechaIndex
+            KeySchema:
+              - AttributeName: driverId
+                KeyType: HASH
+              - AttributeName: creadoEn
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+          # Servicios por estado del usuario (para anti-duplicidad)
+          - IndexName: UsuarioEstadoIndex
+            KeySchema:
+              - AttributeName: usuarioId
+                KeyType: HASH
               - AttributeName: estado
+                KeyType: RANGE
+            Projection:
+              ProjectionType: KEYS_ONLY
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Tabla: conexiones (WebSocket activas)
+    # ═══════════════════════════════════════════════════════════════════
+    ConexionesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: conexiones
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: connectionId
+            AttributeType: S
+          - AttributeName: userId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: connectionId
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: UserIdIndex
+            KeySchema:
+              - AttributeName: userId
                 KeyType: HASH
             Projection:
               ProjectionType: ALL
-        
+        TimeToLiveSpecification:
+          AttributeName: ttl
+          Enabled: true
 
-    UbicacionesMotosTable:
-      Type: AWS::DynamoDB::Table
+    # ═══════════════════════════════════════════════════════════════════
+    # Bucket S3: fotos de perfil (usuarios y conductores)
+    # ═══════════════════════════════════════════════════════════════════
+    FotosBucket:
+      Type: AWS::S3::Bucket
       Properties:
-        TableName: ${self:custom.ubicacionesMotosTable}
-        BillingMode: PAY_PER_REQUEST
+        BucketName: motoramos-fotos-${self:provider.stage}
+        CorsConfiguration:
+          CorsRules:
+            - AllowedHeaders:
+                - '*'
+              AllowedMethods:
+                - PUT
+                - GET
+              AllowedOrigins:
+                - '*'
+              MaxAge: 3600
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: false
+          BlockPublicPolicy: false
+          IgnorePublicAcls: false
+          RestrictPublicBuckets: false
 
-        AttributeDefinitions:
-          - AttributeName: placa
-            AttributeType: S
-          - AttributeName: timestamp
-            AttributeType: S
-        KeySchema:
-          - AttributeName: placa
-            KeyType: HASH
-          - AttributeName: timestamp
-            KeyType: RANGE
-    
-        
+    FotosBucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref FotosBucket
+        PolicyDocument:
+          Statement:
+            - Effect: Allow
+              Principal: '*'
+              Action: s3:GetObject
+              Resource: !Sub '${FotosBucket.Arn}/*'
 
+  Outputs:
+    UsuariosTableArn:
+      Value: !GetAtt UsuariosTable.Arn
+    ConductoresTableArn:
+      Value: !GetAtt ConductoresTable.Arn
+    ServiciosTableArn:
+      Value: !GetAtt ServiciosTable.Arn
+    ConexionesTableArn:
+      Value: !GetAtt ConexionesTable.Arn
+    FotosBucketName:
+      Value: !Ref FotosBucket
