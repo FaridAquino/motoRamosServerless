@@ -275,7 +275,8 @@ def servicio_requerido(event, context):
       "origen": {"lat": -11.4198, "lng": -75.6896, "direccion": "Plaza de Armas"},
       "destino": {"lat": -11.4150, "lng": -75.6820, "direccion": "Terminal Terrestre"},
       "precioSugerido": 1.00,
-      "comentario": "Tengo una maleta"
+      "comentario": "Tengo una maleta",
+      "cantidad": 1
     }
     """
     claims = _get_claims(event)
@@ -288,6 +289,7 @@ def servicio_requerido(event, context):
 
     origen_crudo = body.get('origen')
     destino_crudo = body.get('destino')
+
 
     if not origen_crudo or not destino_crudo:
         return _ws_error('Se requiere origen y destino')
@@ -334,6 +336,7 @@ def servicio_requerido(event, context):
         'precioSugerido': Decimal(str(body.get('precioSugerido', 0))),
         'precioFinal': Decimal('0'),
         'comentario': body.get('comentario', ''),
+        'cantidad': body.get('cantidad', 1),
         'creadoEn': ahora,
         'actualizadoEn': ahora,
     }
@@ -357,6 +360,7 @@ def servicio_requerido(event, context):
         'precioSugerido': float(item['precioSugerido']),
         'nombreUsuario': claims.get('nombre', ''),
         'comentario': body.get('comentario', ''),
+        'cantidad': body.get('cantidad', 1),
         'creadoEn': ahora,
     })
 
