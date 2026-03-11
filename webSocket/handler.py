@@ -214,10 +214,35 @@ def connect(event, context):
 # $disconnect — Limpieza al desconectar
 # ═══════════════════════════════════════════════════════════════════════════════
 def disconnect(event, context):
-    """Elimina la conexión de DynamoDB. El frontend reconexiona automáticamente."""
+    """Limpieza al desconectar.
+    Si el conductor pierde su última conexión activa, se marca activo=false
+    en DynamoDB para que no reciba solicitudes de viaje.
+    Esto cubre el caso donde el usuario elimina la app desde recientes."""
     conn_id = event['requestContext']['connectionId']
     tabla = dynamodb.Table(CONEXIONES_TABLE)
+
+    # Obtener info de la conexión antes de eliminarla
+    response = tabla.get_item(Key={'connectionId': conn_id})
+    item = response.get('Item')
+
+    # Eliminar la conexión
     tabla.delete_item(Key={'connectionId': conn_id})
+
+    # Si era un conductor, verificar si quedaron otras conexiones activas
+    if item and item.get('rol') == 'CONDUCTOR':
+        driver_id = item['userId']
+        remaining = tabla.query(
+            IndexName='UserIdIndex',
+            KeyConditionExpression=Key('userId').eq(driver_id),
+        )
+        if not remaining.get('Items'):
+            # Última conexión del conductor → desactivar
+            dynamodb.Table(CONDUCTORES_TABLE).update_item(
+                Key={'driverId': driver_id},
+                UpdateExpression='SET activo = :val',
+                ExpressionAttributeValues={':val': False},
+            )
+
     return {'statusCode': 200, 'body': 'Desconectado'}
 
 
