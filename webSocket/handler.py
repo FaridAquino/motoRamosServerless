@@ -359,6 +359,7 @@ def servicio_requerido(event, context):
         'destino': destino,
         'precioSugerido': float(item['precioSugerido']),
         'nombreUsuario': claims.get('nombre', ''),
+        'usuarioId': claims.get('sub', ''),
         'comentario': body.get('comentario', ''),
         'cantidad': body.get('cantidad', 1),
         'creadoEn': ahora,
@@ -375,17 +376,76 @@ def servicio_requerido(event, context):
 
     return _ws_ok()
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# solicitudServicioRequerido — Conductor solicita aceptar el servicio
+# ═══════════════════════════════════════════════════════════════════════════════
+def solicitud_servicio_requerido(event, context):
+    """El conductor hce una solicutd de aceptar el servicio del pasajero.
+
+    Body esperado:
+    {
+      "action": "solicitudServicioRequerido",
+      "conductorId": "uuid-del-conductor",
+      "usuarioId": "uuid-del-usuario",
+      "serviceId": "uuid-del-servicio",
+      "ubicaciónConductor": {"lat": -11.4198, "lng": -75.6896},
+      "distancia": 2.5,
+      "tiempoLlegada": 5,
+      "precioOfrecido": 2.00,
+      "nombreConductor": "Juan Pérez"
+    }
+    """
+    claims = _get_claims(event)
+    if claims['rol'] != 'CONDUCTOR':
+        print(f"Intento de solicitudServicioRequerido por rol {claims['rol']}")
+        return _ws_error('Solo conductores pueden solicitar aceptar servicios', 403)
+    body = _parse_body(event)
+
+    tablaServicios= dynamodb.Table(SERVICIOS_TABLE)
+    
+    # Verificar que el servicio exista y esté PENDIENTE
+    result = tablaServicios.get_item(Key={'serviceId': body.get('serviceId', '')})
+
+    if not result.get('Item'):
+        return _ws_error('Servicio no encontrado o ya no está disponible', 404)
+    if result['Item']['estado'] != 'PENDIENTE':
+        return _ws_error('Servicio no está disponible para aceptar', 400)
+
+    #Notificar al usuario
+    apigw = _get_apigw_client(event)
+    _notify_user(apigw, body.get('usuarioId', ''), {
+        'action': 'solicitudServicioRequerido',
+            'conductorId': body.get('conductorId', ''),
+            'ubicaciónConductor': body.get('ubicaciónConductor', {}),
+            'distancia': body.get('distancia', 0),
+            'tiempoLlegada': body.get('tiempoLlegada', 0),
+            'precioOfrecido': body.get('precioOfrecido', 0),
+            'nombreConductor': body.get('nombreConductor', ''),
+    })
+
+    #Notificamos al conductor que su solicitud fue enviada
+    conn_id = event['requestContext']['connectionId']
+    _send_to_connection(apigw, conn_id, {
+        'action': 'servicioRequeridoConfirmacion',
+        'serviceId': body.get('serviceId', ''),
+        'estado': 'PENDIENTE',
+        'message': 'Esperando la respuesta del pasajero...',
+    })
+    
+    return _ws_ok()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# aceptarServicio — Conductor acepta el viaje (asignación atómica)
+# aceptarServicio — Pasajero acepta el servicio a un conductor
 # ═══════════════════════════════════════════════════════════════════════════════
 def aceptar_servicio(event, context):
-    """Un conductor acepta un servicio pendiente.
-    Usa ConditionExpression para asignación atómica (primer conductor gana).
+    """El pasajero acepta el servicio de un conductor específico. Se asigna el conductor al servicio y se notifica a ambas partes.
 
     Body esperado:
     {
       "action": "aceptarServicio",
+      "usuariosId": "uuid-del-usuario",
+      "conductorId": "uuid-del-conductor",
       "serviceId": "uuid-del-servicio",
       "precioOfrecido": 5.00
     }
@@ -393,8 +453,8 @@ def aceptar_servicio(event, context):
     claims = _get_claims(event)
     if not claims:
         return _ws_error('No autenticado', 401)
-    if claims['rol'] != 'CONDUCTOR':
-        return _ws_error('Solo conductores pueden aceptar servicios', 403)
+    if claims['rol'] != 'USUARIO':
+        return _ws_error('Solo usuarios pueden aceptar servicios', 403)
 
     body = _parse_body(event)
     service_id = body.get('serviceId')
@@ -408,7 +468,7 @@ def aceptar_servicio(event, context):
     # Obtener datos del conductor
     driver_res = tabla_cond.get_item(
         Key={'driverId': claims['sub']},
-        ProjectionExpression='nombre, apellido, telefono, placa, marca, color, fotoUrl, '
+        ProjectionExpression='driverId, nombre, apellido, telefono, placa, marca, color, fotoUrl, '
                              'sumaCalificaciones, totalCalificaciones',
     )
     driver_data = driver_res.get('Item', {})
@@ -455,8 +515,21 @@ def aceptar_servicio(event, context):
     total_cal = int(driver_data.get('totalCalificaciones', 0))
     prom = round(float(driver_data.get('sumaCalificaciones', 0)) / total_cal, 2) if total_cal > 0 else 5.0
 
-    # Notificar al pasajero: tu conductor va en camino
-    _notify_user(apigw, serv.get('usuarioId', ''), {
+    # Notificar al conductor
+    _notify_driver(apigw, serv.get('conductorId', ''), {
+        'action': 'servicioAceptadoConfirmacion',
+        'serviceId': service_id,
+        'estado': 'EN_CAMINO',
+        'origen': serv.get('origen', {}),
+        'destino': serv.get('destino', {}),
+        'nombreUsuario': serv.get('nombreUsuario', ''),
+        'precioFinal': float(serv.get('precioFinal', 0)),
+        'message': 'Servicio aceptado. Ve al punto de recojo.'
+    })
+    
+    # Confirmar al usuario
+    conn_id = event['requestContext']['connectionId']
+    _send_to_connection(apigw, conn_id, {
         'action': 'servicioAceptado',
         'serviceId': service_id,
         'estado': 'EN_CAMINO',
@@ -472,27 +545,8 @@ def aceptar_servicio(event, context):
             'calificacion': prom,
         },
         'precioFinal': float(serv.get('precioFinal', 0)),
-        'message': '¡Tu conductor está en camino!',
+        'message': '¡Tu conductor está en camino!'
     })
-
-    # Confirmar al conductor
-    conn_id = event['requestContext']['connectionId']
-    _send_to_connection(apigw, conn_id, {
-        'action': 'servicioAceptadoConfirmacion',
-        'serviceId': service_id,
-        'estado': 'EN_CAMINO',
-        'origen': serv.get('origen', {}),
-        'destino': serv.get('destino', {}),
-        'nombreUsuario': serv.get('nombreUsuario', ''),
-        'precioFinal': float(serv.get('precioFinal', 0)),
-        'message': 'Servicio aceptado. Ve al punto de recojo.',
-    })
-
-    # Notificar a otros conductores que el servicio ya no está disponible
-    _broadcast_to_active_drivers(apigw, {
-        'action': 'servicioTomado',
-        'serviceId': service_id,
-    }, exclude_id=claims['sub'])
 
     return _ws_ok()
 
