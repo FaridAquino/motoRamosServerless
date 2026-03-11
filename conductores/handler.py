@@ -40,21 +40,21 @@ def registerConductor(event, context):
     if not body:
         return error('Falta el body de la solicitud')
 
-    required = ['nombre', 'apellido', 'correo', 'contrasena', 'telefono', 'placa']
+    required = ['nombre', 'apellido', 'telefono', 'contrasena', 'placa']
     missing = [f for f in required if f not in body or not body[f]]
     if missing:
         return error(f'Campos requeridos faltantes: {", ".join(missing)}')
 
     tabla = dynamodb.Table(CONDUCTORES_TABLE)
 
-    # Verificar correo duplicado
+    # Verificar teléfono duplicado
     dup = tabla.query(
-        IndexName='CorreoIndex',
-        KeyConditionExpression=Key('correo').eq(body['correo']),
+        IndexName='TelefonoIndex',
+        KeyConditionExpression=Key('telefono').eq(body['telefono']),
         Select='COUNT',
     )
     if dup['Count'] > 0:
-        return error('Ya existe un conductor registrado con ese correo', 409)
+        return error('Ya existe un conductor registrado con ese teléfono', 409)
 
     # Verificar placa duplicada
     dup_placa = tabla.query(
@@ -72,7 +72,6 @@ def registerConductor(event, context):
         'driverId': driver_id,
         'nombre': body['nombre'],
         'apellido': body['apellido'],
-        'correo': body['correo'],
         'telefono': body['telefono'],
         'placa': body['placa'].upper(),
         'contrasenaHasheada': hash_password(body['contrasena']),
@@ -90,7 +89,7 @@ def registerConductor(event, context):
 
     token = generate_jwt({
         'sub': driver_id,
-        'correo': body['correo'],
+        'telefono': body['telefono'],
         'rol': 'CONDUCTOR',
         'nombre': body['nombre'],
     })
@@ -111,15 +110,15 @@ def loginConductor(event, context):
     if not body:
         return error('Falta el body de la solicitud')
 
-    correo = body.get('correo')
+    telefono = body.get('telefono')
     contrasena = body.get('contrasena')
-    if not correo or not contrasena:
-        return error('Correo y contraseña son requeridos')
+    if not telefono or not contrasena:
+        return error('Teléfono y contraseña son requeridos')
 
     tabla = dynamodb.Table(CONDUCTORES_TABLE)
     result = tabla.query(
-        IndexName='CorreoIndex',
-        KeyConditionExpression=Key('correo').eq(correo),
+        IndexName='TelefonoIndex',
+        KeyConditionExpression=Key('telefono').eq(telefono),
     )
     items = result.get('Items', [])
     if not items:
@@ -132,7 +131,7 @@ def loginConductor(event, context):
 
     token = generate_jwt({
         'sub': conductor['driverId'],
-        'correo': correo,
+        'telefono': conductor.get('telefono'),
         'rol': 'CONDUCTOR',
         'nombre': conductor.get('nombre', ''),
     })

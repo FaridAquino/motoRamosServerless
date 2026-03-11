@@ -42,7 +42,7 @@ resources:
         AttributeDefinitions:
           - AttributeName: driverId
             AttributeType: S
-          - AttributeName: correo
+          - AttributeName: telefono
             AttributeType: S
           - AttributeName: placa
             AttributeType: S
@@ -50,9 +50,9 @@ resources:
           - AttributeName: driverId
             KeyType: HASH
         GlobalSecondaryIndexes:
-          - IndexName: CorreoIndex
+          - IndexName: TelefonoIndex
             KeySchema:
-              - AttributeName: correo
+              - AttributeName: telefono
                 KeyType: HASH
             Projection:
               ProjectionType: ALL
