@@ -81,13 +81,19 @@ functions:
     events:
       - websocket:
           route: cancelarServicio
-
-  # ── Acciones del Conductor ──
+  
   AceptarServicio:
     handler: handler.aceptar_servicio
     events:
       - websocket:
           route: aceptarServicio
+
+  # ── Acciones del Conductor ──
+  SolicitudServicioRequerido:
+    handler: handler.solicitud_servicio_requerido
+    events:
+      - websocket:
+          route: solicitud_servicio_requerido
 
   IniciarViaje:
     handler: handler.iniciar_viaje
