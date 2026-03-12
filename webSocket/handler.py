@@ -421,14 +421,14 @@ def servicio_requerido(event, context):
     return _ws_ok()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# solicitudServicioRequerido — Conductor solicita aceptar el servicio
+# enviarOfertaConductor — Conductor envía una oferta para aceptar el servicio
 # ═══════════════════════════════════════════════════════════════════════════════
-def solicitud_servicio_requerido(event, context):
+def enviar_oferta_conductor(event, context):
     """El conductor hce una solicutd de aceptar el servicio del pasajero.
 
     Body esperado:
     {
-      "action": "solicitudServicioRequerido",
+      "action": "enviarOfertaConductor",
       "conductorId": "uuid-del-conductor",
       "usuarioId": "uuid-del-usuario",
       "serviceId": "uuid-del-servicio",
@@ -473,7 +473,7 @@ def solicitud_servicio_requerido(event, context):
     #Notificar al usuario
     apigw = _get_apigw_client(event)
     _notify_user(apigw, body.get('usuarioId', ''), {
-        'action': 'solicitudServicioRequerido',
+        'action': 'nuevaOfertaConductor',
         'serviceId': body.get('serviceId', ''),
         'conductorId': body.get('conductorId', ''),
         'ubicaciónConductor': body.get('ubicaciónConductor', {}),
@@ -486,7 +486,7 @@ def solicitud_servicio_requerido(event, context):
     #Notificamos al conductor que su solicitud fue enviada
     conn_id = event['requestContext']['connectionId']
     _send_to_connection(apigw, conn_id, {
-        'action': 'servicioRequeridoConfirmacion',
+        'action': 'ofertaEnviadaConfirmacion',
         'serviceId': body.get('serviceId', ''),
         'estado': 'PENDIENTE',
         'message': 'Esperando la respuesta del pasajero...',
@@ -496,14 +496,14 @@ def solicitud_servicio_requerido(event, context):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# aceptarServicio — Pasajero acepta el servicio a un conductor
+# aceptarOferta — Pasajero acepta la oferta de un conductor
 # ═══════════════════════════════════════════════════════════════════════════════
-def aceptar_servicio(event, context):
+def aceptar_oferta(event, context):
     """El pasajero acepta el servicio de un conductor específico. Se asigna el conductor al servicio y se notifica a ambas partes.
 
     Body esperado:
     {
-      "action": "aceptarServicio",
+      "action": "aceptarOferta",
       "usuariosId": "uuid-del-usuario",
       "conductorId": "uuid-del-conductor",
       "serviceId": "uuid-del-servicio",
@@ -578,7 +578,7 @@ def aceptar_servicio(event, context):
     # Notificar al conductor
     print("hasta aqui todo bien: "+ str(serv.get('driverId', '')))
     _notify_driver(apigw, serv.get('driverId', ''), {
-        'action': 'servicioAceptadoConfirmacion',
+        'action': 'ofertaAceptadaPasajero',
         'serviceId': service_id,
         'estado': 'EN_CAMINO',
         'origen': serv.get('origen', {}),
@@ -591,11 +591,11 @@ def aceptar_servicio(event, context):
     # Confirmar al usuario
     conn_id = event['requestContext']['connectionId']
     _send_to_connection(apigw, conn_id, {
-        'action': 'servicioAceptado',
+        'action': 'ofertaAceptadaConfirmacion',
         'serviceId': service_id,
         'estado': 'EN_CAMINO',
         'conductor': {
-            'driverId': claims['sub'],
+            'driverId': body.get('conductorId', ''),
             'nombre': driver_data.get('nombre', ''),
             'apellido': driver_data.get('apellido', ''),
             'telefono': driver_data.get('telefono', ''),
