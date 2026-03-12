@@ -1,4 +1,5 @@
 service: ws-motoRamos
+useDotenv: true
 
 provider:
   name: aws
@@ -39,6 +40,7 @@ provider:
     conductoresTable: conductores
     usuariosTable: usuarios
     JWT_SECRET: ${env:JWT_SECRET, 'motoRamos-tarma-jwt-secret-utec-2026'}
+    GOOGLE_MAPS_API_KEY: ${env:GOOGLE_MAPS_API_KEY}
 
 package:
   patterns:

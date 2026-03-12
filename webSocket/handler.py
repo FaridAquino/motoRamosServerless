@@ -26,6 +26,8 @@ from decimal import Decimal
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from boto3.dynamodb.conditions import Key, Attr
+import urllib.request
+import urllib.parse
 
 from auth_utils import verify_jwt
 
@@ -160,7 +162,7 @@ def _get_claims(event) -> dict | None:
     }
 
 
-def _coordenadas_a_decimal(ubicacion):
+def _coordenadas_a_decimal(ubicacion) -> dict:
     """
     Convierte lat y lng de un diccionario a Decimal para DynamoDB.
     Usa str() intermedio para evitar errores de precisión de punto flotante.
@@ -177,6 +179,48 @@ def _coordenadas_a_decimal(ubicacion):
         ubi_segura['lng'] = Decimal(str(ubi_segura['lng']))
         
     return ubi_segura
+
+def _obtener_distancia_tiempo(lat_origen, lon_origen, lat_destino, lon_destino) -> dict:
+    # 1. Leer la variable que Serverless inyectó desde tu .env
+    api_key = os.environ.get('GOOGLE_MAPS_API_KEY')
+    
+    if not api_key:
+        print("Error: GOOGLE_MAPS_API_KEY no está configurada")
+        return None
+
+    # 2. Construir los parámetros
+    params = {
+        "origin": f"{lat_origen},{lon_origen}",
+        "destination": f"{lat_destino},{lon_destino}",
+        "mode": "driving",
+        "key": api_key
+    }
+    
+    # Codificar los parámetros en la URL
+    query_string = urllib.parse.urlencode(params)
+    url = f"https://maps.googleapis.com/maps/api/directions/json?{query_string}"
+
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=5) as response:
+            respuesta_json = json.loads(response.read().decode('utf-8'))
+
+            if respuesta_json.get("status") == "OK":
+                leg = respuesta_json["routes"][0]["legs"][0]
+                
+                return {
+                    "distancia_texto": leg["distance"]["text"],
+                    "distancia_metros": leg["distance"]["value"],
+                    "tiempo_texto": leg["duration"]["text"],
+                    "tiempo_segundos": leg["duration"]["value"]
+                }
+            else:
+                print(f"Error en Google Maps API: {respuesta_json.get('status')}")
+                return None
+                
+    except Exception as e:
+        print(f"Error de conexión con Google Maps: {e}")
+        return None
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # $connect — Autenticación JWT al conectar al WebSocket
@@ -389,8 +433,7 @@ def solicitud_servicio_requerido(event, context):
       "usuarioId": "uuid-del-usuario",
       "serviceId": "uuid-del-servicio",
       "ubicaciónConductor": {"lat": -11.4198, "lng": -75.6896},
-      "distancia": 2.5,
-      "tiempoLlegada": 5,
+      "ubicaciónPasajero": {"lat": -11.4198, "lng": -75.6896},
       "precioOfrecido": 2.00,
       "nombreConductor": "Juan Pérez"
     }
@@ -411,6 +454,22 @@ def solicitud_servicio_requerido(event, context):
     if result['Item']['estado'] != 'PENDIENTE':
         return _ws_error('Servicio no está disponible para aceptar', 400)
 
+    informacionDistancia = _obtener_distancia_tiempo(
+        body.get('ubicaciónConductor', {}).get('lat'),
+        body.get('ubicaciónConductor', {}).get('lng'),
+        body.get('ubicaciónPasajero', {}).get('lat'),
+        body.get('ubicaciónPasajero', {}).get('lng'),
+    )
+
+    if informacionDistancia is None:
+        print("No se pudo obtener distancia y tiempo desde Google Maps. Usando valores por defecto.")
+        informacionDistancia = {
+            'distancia_texto': 'Desconocida',
+            'distancia_metros': 0,
+            'tiempo_texto': 'Desconocido',
+            'tiempo_segundos': 0,
+        }
+    
     #Notificar al usuario
     apigw = _get_apigw_client(event)
     _notify_user(apigw, body.get('usuarioId', ''), {
@@ -418,8 +477,8 @@ def solicitud_servicio_requerido(event, context):
         'serviceId': body.get('serviceId', ''),
         'conductorId': body.get('conductorId', ''),
         'ubicaciónConductor': body.get('ubicaciónConductor', {}),
-        'distancia': body.get('distancia', 0),
-        'tiempoLlegada': body.get('tiempoLlegada', 0),
+        'distancia': informacionDistancia.get('distancia_texto', "0"),
+        'tiempoLlegada': informacionDistancia.get('tiempo_texto', "0"),
         'precioOfrecido': body.get('precioOfrecido', 0),
         'nombreConductor': body.get('nombreConductor', ''),
     })
