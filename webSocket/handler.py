@@ -516,7 +516,8 @@ def aceptar_servicio(event, context):
     prom = round(float(driver_data.get('sumaCalificaciones', 0)) / total_cal, 2) if total_cal > 0 else 5.0
 
     # Notificar al conductor
-    _notify_driver(apigw, serv.get('conductorId', ''), {
+    print("hasta aqui todo bien: "+ str(serv.get('driverId', '')))
+    _notify_driver(apigw, serv.get('driverId', ''), {
         'action': 'servicioAceptadoConfirmacion',
         'serviceId': service_id,
         'estado': 'EN_CAMINO',

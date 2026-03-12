@@ -93,7 +93,7 @@ functions:
     handler: handler.solicitud_servicio_requerido
     events:
       - websocket:
-          route: solicitud_servicio_requerido
+          route: solicitudServicioRequerido
 
   IniciarViaje:
     handler: handler.iniciar_viaje
