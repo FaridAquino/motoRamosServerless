@@ -415,12 +415,13 @@ def solicitud_servicio_requerido(event, context):
     apigw = _get_apigw_client(event)
     _notify_user(apigw, body.get('usuarioId', ''), {
         'action': 'solicitudServicioRequerido',
-            'conductorId': body.get('conductorId', ''),
-            'ubicaciónConductor': body.get('ubicaciónConductor', {}),
-            'distancia': body.get('distancia', 0),
-            'tiempoLlegada': body.get('tiempoLlegada', 0),
-            'precioOfrecido': body.get('precioOfrecido', 0),
-            'nombreConductor': body.get('nombreConductor', ''),
+        'serviceId': body.get('serviceId', ''),
+        'conductorId': body.get('conductorId', ''),
+        'ubicaciónConductor': body.get('ubicaciónConductor', {}),
+        'distancia': body.get('distancia', 0),
+        'tiempoLlegada': body.get('tiempoLlegada', 0),
+        'precioOfrecido': body.get('precioOfrecido', 0),
+        'nombreConductor': body.get('nombreConductor', ''),
     })
 
     #Notificamos al conductor que su solicitud fue enviada
@@ -484,7 +485,7 @@ def aceptar_servicio(event, context):
             ),
             ConditionExpression='estado = :pendiente AND driverId = :none',
             ExpressionAttributeValues={
-                ':d': claims['sub'],
+                ':d': body.get('conductorId', ''),
                 ':e': 'EN_CAMINO',
                 ':pendiente': 'PENDIENTE',
                 ':none': 'NONE',
