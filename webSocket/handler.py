@@ -467,7 +467,7 @@ def aceptar_servicio(event, context):
 
     # Obtener datos del conductor
     driver_res = tabla_cond.get_item(
-        Key={'driverId': claims['sub']},
+        Key={'driverId': body.get('conductorId', '')},
         ProjectionExpression='driverId, nombre, apellido, telefono, placa, marca, color, fotoUrl, '
                              'sumaCalificaciones, totalCalificaciones',
     )
