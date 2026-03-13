@@ -641,6 +641,7 @@ def conductor_esperando(event, context):
     ubicacionConductor=_coordenadas_a_decimal(ubicacionConductorCruda)
 
     try:
+        print("Intentado actualizar servicio")
         tabla = dynamodb.Table(SERVICIOS_TABLE)
         tabla.update_item(
             Key={'serviceId': body.get('serviceId', '')},
@@ -655,8 +656,10 @@ def conductor_esperando(event, context):
             }
         )
     except Exception as e:
+        print("Error al actualizar el servicio a ESPERANDO: ", str(e))
         return _ws_error('Error al actualizar el servicio', 500)
 
+    print("Servicio actualizado a ESPERANDO, notificando al usuario...")
     #notificamos al usuario que el conductor ya está esperando en el punto de recojo
     apigw = _get_apigw_client(event)
     _notify_user(apigw, body.get('usuarioId', ''), {
