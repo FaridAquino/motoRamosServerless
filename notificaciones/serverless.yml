@@ -1,0 +1,90 @@
+service: notificaciones-motoRamos
+
+provider:
+  name: aws
+  runtime: python3.12
+  timeout: 29
+  region: us-east-1
+  stage: dev
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:GetItem
+            - dynamodb:DeleteItem
+            - dynamodb:UpdateItem
+            - dynamodb:Query
+            - dynamodb:Scan
+          Resource:
+            - "arn:aws:dynamodb:us-east-1:*:table/conexiones"
+            - "arn:aws:dynamodb:us-east-1:*:table/conexiones/index/*"
+            - "arn:aws:dynamodb:us-east-1:*:table/servicios"
+            - "arn:aws:dynamodb:us-east-1:*:table/servicios/index/*"
+            - "arn:aws:dynamodb:us-east-1:*:table/conductores"
+            - "arn:aws:dynamodb:us-east-1:*:table/conductores/index/*"
+            - "arn:aws:dynamodb:us-east-1:*:table/usuarios"
+            - "arn:aws:dynamodb:us-east-1:*:table/usuarios/index/*"
+            - "arn:aws:dynamodb:us-east-1:*:table/${self:custom.usersDevices}"
+        - Effect: Allow
+          Action:
+            - execute-api:ManageConnections
+          Resource:
+            - "arn:aws:execute-api:us-east-1:*:*/@connections/*"
+
+  environment:
+    USERS_DEVICES: ${self:custom.usersDevices}
+
+package:
+  patterns:
+    - '!node_modules/**'       # Ignorar carpeta de node
+    - '!.serverless/**'        # Ignorar carpeta oculta de despliegue
+    - '!venv/**'               # Ignorar entorno virtual (si tienes uno)
+    - '!__pycache__/**'        # Ignorar archivos compilados de python
+    - '!package-lock.json'
+    - ./** # Incluir todo lo demás (tu código + librerías instaladas)
+  
+
+custom:
+  usersDevices: UsersDevicesMotoRamos
+  snsTopicName: send-push-notification-topic
+  
+functions:
+  registrarToken:
+    handler: handler.registrarToken
+    events:
+      - http:
+          path: /registrarToken
+          method: post
+          cors: true
+
+  sendPushNotification:
+    handler: handler.lambda_handler
+    events:
+      - sns:
+          arn: !Ref PushNotificationsTopic
+          topicName: ${self:custom.snsTopicName}
+  
+resources:
+  Resources:
+    UsersDevice:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.usersDevices}
+        AttributeDefinitions:
+          - AttributeName: telefono
+            AttributeType: S
+        KeySchema:
+          - AttributeName: telefono
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+      
+    PushNotificationsTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: ${self:custom.snsTopicName}
+        DisplayName: "Notificaciones motoRamos"
+    
+
