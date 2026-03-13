@@ -199,6 +199,7 @@ def _obtener_distancia_tiempo(lat_origen, lon_origen, lat_destino, lon_destino) 
     # Codificar los parámetros en la URL
     query_string = urllib.parse.urlencode(params)
     url = f"https://maps.googleapis.com/maps/api/directions/json?{query_string}"
+    print(f"Solicitando a Google Maps API: {url}")
 
     try:
         req = urllib.request.Request(url)
@@ -207,7 +208,7 @@ def _obtener_distancia_tiempo(lat_origen, lon_origen, lat_destino, lon_destino) 
 
             if respuesta_json.get("status") == "OK":
                 leg = respuesta_json["routes"][0]["legs"][0]
-                
+                print(f"Respuesta de Google Maps API: {leg}")
                 return {
                     "distancia_texto": leg["distance"]["text"],
                     "distancia_metros": leg["distance"]["value"],
