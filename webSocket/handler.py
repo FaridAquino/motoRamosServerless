@@ -627,7 +627,9 @@ def conductor_esperando(event, context):
       "serviceId": "uuid-del-servicio",
     }
     """
+    print("Conductor esperando - evento recibido: ", event)
     claims = _get_claims(event)
+    print("Claims obtenidas: ", claims)
     if not claims:
         return _ws_error('No autenticado', 401)
     if claims['rol'] != 'CONDUCTOR':
