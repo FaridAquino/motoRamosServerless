@@ -635,8 +635,12 @@ def conductor_esperando(event, context):
     if claims['rol'] != 'CONDUCTOR':
         return _ws_error('Solo conductores pueden aceptar servicios', 403)
     
+    print("Saliendo de validacion")
+
     body = _parse_body(event)
     ubicacionConductorCruda= body.get('ubicacionConductor')
+    print(ubicacionConductorCruda)
+    
     if not ubicacionConductorCruda:
         return _ws_error('ubicacionConductor es requerida')
     
