@@ -828,7 +828,7 @@ def iniciar_viaje(event, context):
             ConditionExpression='estado = :enc AND driverId = :d',
             ExpressionAttributeValues={
                 ':e': 'EN_CURSO',
-                ':enc': 'EN_CAMINO',
+                ':enc': 'ESPERANDO',
                 ':d': claims['sub'],
                 ':t': ahora,
             },
