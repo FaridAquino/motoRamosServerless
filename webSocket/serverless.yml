@@ -89,6 +89,12 @@ functions:
     events:
       - websocket:
           route: aceptarOferta
+  
+  ObtenerUbicacionRecojo:
+    handler: handler.obtener_ubicacion_recojo
+    events:
+      - websocket:
+          route: obtenerUbicacionRecojo
 
   # ── Acciones del Conductor ──
   EnviarOfertaConductor:
@@ -114,6 +120,18 @@ functions:
     events:
       - websocket:
           route: registrarUbicacionMoto
+  
+  ConductorEsperando:
+    handler: handler.conductor_esperando
+    events:
+      - websocket:
+          route: conductorEsperando
+
+  CancelarViajeConductor:
+    handler: handler.cancelar_viaje_conductor
+    events:
+      - websocket:
+          route: cancelarViajeConductor
 
   # ── Comunicación ──
   Informar:

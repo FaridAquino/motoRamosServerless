@@ -180,6 +180,7 @@ def _coordenadas_a_decimal(ubicacion) -> dict:
         
     return ubi_segura
 
+
 def _obtener_distancia_tiempo(lat_origen, lon_origen, lat_destino, lon_destino) -> dict:
     # 1. Leer la variable que Serverless inyectó desde tu .env
     api_key = os.environ.get('GOOGLE_MAPS_API_KEY')
@@ -606,6 +607,181 @@ def aceptar_oferta(event, context):
         },
         'precioFinal': float(serv.get('precioFinal', 0)),
         'message': '¡Tu conductor está en camino!'
+    })
+
+    return _ws_ok()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# conductorEsperando — Conductor llegó al punto de recojo, esperando al pasajero
+# ═══════════════════════════════════════════════════════════════════════════════
+def conductor_esperando(event, context):
+    """El pasajero acepta el servicio de un conductor específico. Se asigna el conductor al servicio y se notifica a ambas partes.
+
+    Body esperado:
+    {
+      "action": "conductorEsperando",
+      "usuariosId": "uuid-del-usuario",
+      "conductorId": "uuid-del-conductor",
+      "ubicacionConductor": {"lat": -11.4198, "lng": -75.6896},
+      "serviceId": "uuid-del-servicio",
+    }
+    """
+    claims = _get_claims(event)
+    if not claims:
+        return _ws_error('No autenticado', 401)
+    if claims['rol'] != 'CONDUCTOR':
+        return _ws_error('Solo conductores pueden aceptar servicios', 403)
+    
+    body = _parse_body(event)
+    ubicacionConductorCruda= body.get('ubicacionConductor')
+    if not ubicacionConductorCruda:
+        return _ws_error('ubicacionConductor es requerida')
+    
+    ubicacionConductor=_coordenadas_a_decimal(ubicacionConductorCruda)
+
+    try:
+        tabla = dynamodb.Table(SERVICIOS_TABLE)
+        tabla.update_item(
+            Key={'serviceId': body.get('serviceId', '')},
+            UpdateExpression='SET estado = :e, actualizadoEn = :t, ubicacionConductor = :ub',
+            ConditionExpression='estado = :enc AND driverId = :d',
+            ExpressionAttributeValues={
+                ':e': 'ESPERANDO',
+                'enc': 'EN_CAMINO',
+                ':d': claims['sub'],
+                ':t': datetime.now(ZONA_PERU).isoformat(),
+                ':ub': ubicacionConductor,
+            }
+        )
+    except Exception as e:
+        return _ws_error('Error al actualizar el servicio', 500)
+
+    #notificamos al usuario que el conductor ya está esperando en el punto de recojo
+    apigw = _get_apigw_client(event)
+    _notify_user(apigw, body.get('usuarioId', ''), {
+        'action': 'conductorEsperandoConfirmacion',
+        'serviceId': body.get('serviceId', ''),
+        'ubicacionConductor': body.get('ubicacionConductor', {}),
+        'message': 'Tu conductor ya está esperando en el punto de recojo. Por favor, confirma que estás listo para iniciar el viaje.',
+    })
+
+    #confirmamos al conductor que le eviamos el websocket al pasajero
+    conn_id = event['requestContext']['connectionId']
+    _send_to_connection(apigw, conn_id, {
+        'action': 'conductorEsperandoConfirmacion',
+        'serviceId': body.get('serviceId', ''),
+        'ubicacionConductor': body.get('ubicacionConductor', {}),
+        'message': 'Tu pasajero ya fue informado. Por favor, espere a que llegue.',
+    })
+
+    return _ws_ok()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# cancelarViajeConductor — Conductor cancela el viaje antes de iniciar (pasajero no subió)
+# ═══════════════════════════════════════════════════════════════════════════════
+def cancelar_viaje_conductor(event, context):
+    """El conductor cancela el viaje antes de iniciar (pasajero no subió). Estado → CANCELADO.
+
+    Body esperado:
+    {
+      "action": "cancelarViajeConductor",
+      "serviceId": "uuid-del-servicio",
+      "motivo": "Pasajero no apareció"
+    }
+    """
+
+    claims = _get_claims(event)
+    if not claims:
+        return _ws_error('No autenticado', 401)
+    if claims['rol'] != 'CONDUCTOR':
+        return _ws_error('Solo conductores pueden cancelar viajes', 403)
+
+    body = _parse_body(event)
+    service_id = body.get('serviceId')
+    motivo = body.get('motivo', 'Sin motivo especificado')
+    if not service_id:
+        return _ws_error('serviceId es requerido')
+
+    ahora = datetime.now(ZONA_PERU).isoformat()
+    tabla = dynamodb.Table(SERVICIOS_TABLE)
+
+    try:
+        tabla.update_item(
+            Key={'serviceId': service_id},
+            UpdateExpression='SET estado = :e, canceladoEn = :t, motivoCancelacion = :m, actualizadoEn = :t, canceladoPor = :c',
+            ConditionExpression='estado IN (:encamino) AND driverId = :d',
+            ExpressionAttributeValues={
+                ':e': 'CANCELADO',
+                ':encamino': 'EN_CAMINO',
+                ':d': claims['sub'],
+                ':m': motivo,
+                ':t': ahora,
+                ':c': 'CONDUCTOR',
+            },
+        )
+    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+        return _ws_error('No se puede cancelar el viaje. Verifica el estado del servicio.')
+
+    # Obtener servicio para notificar al pasajero
+    serv = tabla.get_item(Key={'serviceId': service_id}).get('Item', {})
+    apigw = _get_apigw_client(event)
+
+    _notify_user(apigw, serv.get('usuarioId', ''), {
+        'action': 'viajeCanceladoConductor',
+        'serviceId': service_id,
+        'estado': 'CANCELADO',
+        'motivo': motivo,
+        'message': f'El conductor ha cancelado el viaje. Motivo: {motivo}',
+    })
+
+    conn_id = event['requestContext']['connectionId']
+    _send_to_connection(apigw, conn_id, {
+        'action': 'viajeCanceladoConductorConfirmacion',
+        'serviceId': service_id,
+        'estado': 'CANCELADO',
+        'motivo': motivo,
+        'message': f'Viaje cancelado. Motivo: {motivo}',
+    })
+
+    return _ws_ok()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# obtenerUbicacionRecojo - Usuario obtiene la ubicación del conductor para el recojo
+# ═══════════════════════════════════════════════════════════════════════════════
+def obtener_ubicacion_recojo(event, context):
+    """El usuario obtiene la ubicación del conductor para el recojo.
+
+    Body esperado:
+    { "action": "obtenerUbicacionRecojo", "serviceId": "uuid" }
+    """
+    claims = _get_claims(event)
+    if not claims:
+        return _ws_error('No autenticado', 401)
+    if claims['rol'] != 'USUARIO':
+        return _ws_error('Solo usuarios pueden obtener la ubicación del conductor', 403)
+
+    body = _parse_body(event)
+    service_id = body.get('serviceId')
+    if not service_id:
+        return _ws_error('serviceId es requerido')
+
+    tabla = dynamodb.Table(SERVICIOS_TABLE)
+    serv = tabla.get_item(Key={'serviceId': service_id}).get('Item', {})
+
+    if not serv:
+        return _ws_error('Servicio no encontrado')
+
+    conn_id = event['requestContext']['connectionId']
+    apigw = _get_apigw_client(event)
+
+    _send_to_connection(apigw, conn_id, {
+        'action': 'ubicacionRecojo',
+        'serviceId': service_id,
+        'ubicacionConductor': serv.get('ubicacionConductor', {}),
+        'message': 'Ubicación del conductor obtenida.',
     })
 
     return _ws_ok()
