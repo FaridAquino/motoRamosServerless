@@ -648,7 +648,7 @@ def conductor_esperando(event, context):
             ConditionExpression='estado = :enc AND driverId = :d',
             ExpressionAttributeValues={
                 ':e': 'ESPERANDO',
-                'enc': 'EN_CAMINO',
+                ':enc': 'EN_CAMINO',
                 ':d': claims['sub'],
                 ':t': datetime.now(ZONA_PERU).isoformat(),
                 ':ub': ubicacionConductor,
@@ -662,6 +662,7 @@ def conductor_esperando(event, context):
     _notify_user(apigw, body.get('usuarioId', ''), {
         'action': 'conductorEsperandoConfirmacion',
         'serviceId': body.get('serviceId', ''),
+        'estado': 'ESPERANDO',
         'ubicacionConductor': body.get('ubicacionConductor', {}),
         'message': 'Tu conductor ya está esperando en el punto de recojo. Por favor, confirma que estás listo para iniciar el viaje.',
     })
@@ -671,6 +672,7 @@ def conductor_esperando(event, context):
     _send_to_connection(apigw, conn_id, {
         'action': 'conductorEsperandoConfirmacion',
         'serviceId': body.get('serviceId', ''),
+        'estado': 'ESPERANDO',
         'ubicacionConductor': body.get('ubicacionConductor', {}),
         'message': 'Tu pasajero ya fue informado. Por favor, espere a que llegue.',
     })
