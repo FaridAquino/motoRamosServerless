@@ -2,7 +2,7 @@ service: notificaciones-motoRamos
 
 provider:
   name: aws
-  runtime: python3.12
+  runtime: python3.10
   timeout: 29
   region: us-east-1
   stage: dev
