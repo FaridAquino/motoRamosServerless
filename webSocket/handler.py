@@ -490,7 +490,7 @@ def servicio_requerido(event, context):
     print(f"Enviando notificacion a {len(listaConductores)} conductores")
 
     _enviar_notificacion_push(
-        listaUsuarios=[body.get('usuarioId', '')], #solo para probar
+        listaUsuarios=[claims['sub']], #solo para probar
         listaConductores=listaConductores,
         title='Nuevo servicio solicitado',
         body={
