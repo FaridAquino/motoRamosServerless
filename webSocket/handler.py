@@ -487,17 +487,17 @@ def servicio_requerido(event, context):
 
     listaConductores = [item['driverId'] for item in response.get('Items', [])]
 
-    print(f"Enviando notificacion")
+    print(f"Enviando notificacion a {len(listaConductores)} conductores")
 
     _enviar_notificacion_push(
-        listaUsuarios=[],
+        listaUsuarios=[body.get('usuarioId', '')], #solo para probar
         listaConductores=listaConductores,
         title='Nuevo servicio solicitado',
         body={
             'action': 'nuevoServicio',
             'serviceId': service_id,
-            'origen': origen,
-            'destino': destino,
+            'origen': origen_crudo,
+            'destino': destino_crudo,
             'precioSugerido': float(item['precioSugerido']),
             'nombreUsuario': claims.get('nombre', ''),
             'usuarioId': claims.get('sub', ''),
