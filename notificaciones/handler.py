@@ -23,9 +23,9 @@ def _parse_sns_data(data: dict) -> dict:
     """
     # Si por alguna razón la data no es un diccionario, retornamos valores por defecto
     if not isinstance(data, dict):
-        return {'telefonos': [], 'title': '', 'body': {}}
+        return {'usersId': [], 'title': '', 'body': {}}
 
-    telefonos = data.get('telefonos', [])
+    usersId = data.get('usersId', [])
     titulo = data.get('title', 'Notificación')
     raw_body = data.get('body', {})
 
@@ -43,7 +43,7 @@ def _parse_sns_data(data: dict) -> dict:
 
     # Retornamos todo empacado y listo para usar
     return {
-        'telefonos': telefonos,
+        'usersId': usersId,
         'title': titulo,
         'body': body_dict
     }
@@ -59,26 +59,26 @@ def registrarToken(event, context):
 
         body = json.loads(event['body'])
 
-        telefono = body.get('telefono')
+        userId = body.get('userId')
         device_token = body.get('device_token')
         
-        if not telefono or not device_token:
+        if not userId or not device_token:
             return {
                 'statusCode': 400,
-                'body': json.dumps({'error': 'Faltan datos (telefono o device_token)'})
+                'body': json.dumps({'error': 'Faltan datos (userId o device_token)'})
             }
 
         usersDevicesTable = boto3.resource('dynamodb').Table(USERS_DEVICES_TABLE)
         
         usersDevicesJson = {
-            'telefono': telefono,
+            'userId': userId,
             'device_token': device_token
         }
         
         try:
             usersDevicesTable.put_item(
                 Item=usersDevicesJson,
-                ConditionExpression='attribute_not_exists(telefono)'
+                ConditionExpression='attribute_not_exists(userId)'
             )
             
             return {
@@ -88,7 +88,7 @@ def registrarToken(event, context):
 
         except ClientError as e:
             if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
-                print(f"El token para {telefono} ya existía. No se hizo nada.")
+                print(f"El token para {userId} ya existía. No se hizo nada.")
                 return {
                     'statusCode': 200, # Retornamos 200 OK porque la solicitud fue procesada correctamente
                     'body': json.dumps({
@@ -105,6 +105,7 @@ def registrarToken(event, context):
             'statusCode': 500,
             'body': json.dumps({'error': str(e)})
         }
+
 
 def _enviar_notificaciones_fcm(tokens_to_send, titulo, body_data):
     """
@@ -145,6 +146,7 @@ def _enviar_notificaciones_fcm(tokens_to_send, titulo, body_data):
     print(f"--- Resultado Final FCM: {enviados} enviados, {errores} fallidos ---")
     return enviados, errores
 
+
 def lambda_handler(event, context):
     print("Evento recibido de SNS:", json.dumps(event))
     print(f"--- [DEBUG] Versión Firebase en Lambda: {firebase_admin.__version__} ---")
@@ -157,13 +159,14 @@ def lambda_handler(event, context):
             
     return {'statusCode': 200, 'body': 'Procesado'}
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# nuevoServicio — Notifica a conductores un nuevo servicio
+# nuevoServicio — Notifica a usuarios y conductores
 # ═══════════════════════════════════════════════════════════════════════════════
 def notificar(data):
     """Data esperada: 
     {
-        'telefonos': ['123456789'],
+        'usersId': ['userId1', 'userId2', ...],
         'title': '(viene de SNS)',
         'body': {
             "action": "XXX", # Puedes usar esto para que el cliente sepa qué hacer al recibir la notificación
@@ -179,7 +182,7 @@ def notificar(data):
 
     parsed_data = _parse_sns_data(data)
     
-    target_users = parsed_data['telefonos']
+    target_users = parsed_data['usersId']
     titulo = parsed_data.get('title', 'Nuevo servicio x')
     body = parsed_data['body']
     
@@ -189,10 +192,10 @@ def notificar(data):
 
     tokens_to_send = []
     
-    for telefono in target_users:
+    for userId in target_users:
         try:
             response = table.query(
-                KeyConditionExpression=Key('telefono').eq(telefono)
+                KeyConditionExpression=Key('userId').eq(userId)
             )
             items = response.get('Items', [])
             for item in items:
@@ -201,7 +204,7 @@ def notificar(data):
                 if 'device_token' in item: 
                     tokens_to_send.append(item['device_token'])
         except Exception as e:
-            print(f"Error consultando DynamoDB para {telefono}: {e}")
+            print(f"Error consultando DynamoDB para {userId}: {e}")
             
     if not tokens_to_send:
         print("No se encontraron tokens válidos en BD.")

@@ -73,10 +73,10 @@ resources:
       Properties:
         TableName: ${self:custom.usersDevices}
         AttributeDefinitions:
-          - AttributeName: telefono
+          - AttributeName: userId
             AttributeType: S
         KeySchema:
-          - AttributeName: telefono
+          - AttributeName: userId
             KeyType: HASH
         BillingMode: PAY_PER_REQUEST
       

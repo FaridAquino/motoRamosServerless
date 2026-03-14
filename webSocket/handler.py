@@ -36,9 +36,14 @@ CONEXIONES_TABLE = os.environ['conexionesTable']
 SERVICIOS_TABLE = os.environ['serviciosTable']
 CONDUCTORES_TABLE = os.environ['conductoresTable']
 USUARIOS_TABLE = os.environ['usuariosTable']
+Users_DEVICES_TABLE = os.environ['Users_Devices']
 
 dynamodb = boto3.resource('dynamodb')
 ZONA_PERU = ZoneInfo('America/Lima')
+
+SNS_TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN')
+
+sns_client = boto3.client('sns')
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -221,6 +226,61 @@ def _obtener_distancia_tiempo(lat_origen, lon_origen, lat_destino, lon_destino) 
     except Exception as e:
         print(f"Error de conexión con Google Maps: {e}")
         return None
+
+
+def _enviar_notificacion_push(listaUsuarios: list, listaConductores: list, body: dict, title: str) -> None:
+    """Envía una notificación push a una lista de destinatarios usando SNS.
+        listaUsuarios esperada [userId1,userId2,...].
+        listaConductores esperada [driverId1,driverId2,...].
+    """
+
+    if SNS_TOPIC_ARN:
+        try:
+            print("--- [SNS] Iniciando proceso de notificación a usuarios ---")
+            
+            destinatariosUsuarios = list(set(listaUsuarios))
+            
+            if destinatariosUsuarios:
+                
+                sns_payload = {
+                    "usersId": destinatariosUsuarios,
+                    "title": title,
+                    "body": body
+                }
+
+                # D. Publicamos al SNS
+                sns_client.publish(
+                    TopicArn=SNS_TOPIC_ARN,
+                    Message=json.dumps(sns_payload)
+                )
+                print(f"[SNS] Mensaje enviado al Topic para {len(destinatariosUsuarios)} usuarios.")
+            else:
+                print("[SNS] No se encontraron usuarios en la tabla para notificar.")
+            
+            print("--- [SNS] Iniciando proceso de notificación a conductores ---")
+            destinatariosConductores = list(set(listaConductores))
+
+            if destinatariosConductores:
+                sns_payload = {
+                    "usersId": destinatariosConductores,
+                    "title": title,
+                    "body": body
+                }
+
+                # D. Publicamos al SNS
+                sns_client.publish(
+                    TopicArn=SNS_TOPIC_ARN,
+                    Message=json.dumps(sns_payload)
+                )
+                print(f"[SNS] Mensaje enviado al Topic para {len(destinatariosConductores)} conductores.")
+            else:
+                print("[SNS] No se encontraron conductores en la tabla para notificar.")
+            
+        except Exception as e:
+            print(f"[Error SNS] Fallo al enviar notificación: {e}")
+    else:
+        print("[SNS] Omitido: Faltan variables SNS_TOPIC_ARN o USERS_DEVICES_TABLE")
+    
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # $connect — Autenticación JWT al conectar al WebSocket
@@ -418,6 +478,33 @@ def servicio_requerido(event, context):
         'message': 'Buscando conductor disponible en Tarma...',
     })
 
+    # Enviamos una notficacion a todos los conductores activos usando SNS
+    tablaConductores = dynamodb.Table(CONDUCTORES_TABLE)
+
+    response = tablaConductores.scan(
+        ProjectionExpression='driverId',
+    )
+
+    listaConductores = [item['driverId'] for item in response.get('Items', [])]
+
+    _enviar_notificacion_push(
+        listaUsuarios=[],
+        listaConductores=listaConductores,
+        title='Nuevo servicio solicitado',
+        body={
+            'action': 'nuevoServicio',
+            'serviceId': service_id,
+            'origen': origen,
+            'destino': destino,
+            'precioSugerido': float(item['precioSugerido']),
+            'nombreUsuario': claims.get('nombre', ''),
+            'usuarioId': claims.get('sub', ''),
+            'comentario': body.get('comentario', ''),
+            'cantidad': body.get('cantidad', 1),
+            'creadoEn': ahora,
+        }
+    )
+
     return _ws_ok()
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -491,6 +578,23 @@ def enviar_oferta_conductor(event, context):
         'estado': 'PENDIENTE',
         'message': 'Esperando la respuesta del pasajero...',
     })
+
+    # Envia notificacion push al usuario sobre la nueva oferta del conductor
+    _enviar_notificacion_push(
+        listaUsuarios=[body.get('usuarioId', '')],
+        listaConductores=[],
+        title='Nuevo oferta de un conductor',
+        body={
+            'action': 'nuevaOfertaConductor',
+            'serviceId': body.get('serviceId', ''),
+            'conductorId': body.get('conductorId', ''),
+            'ubicaciónConductor': body.get('ubicaciónConductor', {}),
+            'distancia': informacionDistancia.get('distancia_texto', "0"),
+            'tiempoLlegada': informacionDistancia.get('tiempo_texto', "0"),
+            'precioOfrecido': body.get('precioOfrecido', 0),
+            'nombreConductor': body.get('nombreConductor', ''),
+        }
+    )
     
     return _ws_ok()
 
@@ -609,6 +713,22 @@ def aceptar_oferta(event, context):
         'message': '¡Tu conductor está en camino!'
     })
 
+    # Enviamos una notficacion a conductor
+    _enviar_notificacion_push(
+        listaUsuarios=[],
+        listaConductores=[serv.get('driverId', '')],
+        title='Tu oferta fue aceptada',
+        body={
+            'action': 'ofertaAceptadaPasajero',
+            'serviceId': service_id,
+            'estado': 'EN_CAMINO',
+            'origen': serv.get('origen', {}),
+            'destino': serv.get('destino', {}),
+            'nombreUsuario': serv.get('nombreUsuario', ''),
+            'precioFinal': float(serv.get('precioFinal', 0)),
+            'message': '¡Tu oferta fue aceptada por el pasajero! Ve al punto de recojo.'
+        }
+    )
     return _ws_ok()
 
 
@@ -686,6 +806,20 @@ def conductor_esperando(event, context):
         'message': 'Tu pasajero ya fue informado. Por favor, espere a que llegue.',
     })
 
+    # Enviamos una notficacion al pasajero sobre que el conductor ya está esperando en el punto de recojo
+    _enviar_notificacion_push(
+        listaUsuarios=[body.get('usuarioId', '')],
+        listaConductores=[],
+        title='Tu conductor ya está esperando',
+        body={
+            'action': 'conductorEsperandoConfirmacion',
+            'serviceId': body.get('serviceId', ''),
+            'estado': 'ESPERANDO',
+            'ubicacionConductor': body.get('ubicacionConductor', {}),
+            'message': 'Tu conductor ya está esperando en el punto de recojo. Por favor, confirma que estás listo para iniciar el viaje.',
+        }
+    )
+
     return _ws_ok()
 
 
@@ -755,6 +889,20 @@ def cancelar_viaje_conductor(event, context):
         'motivo': motivo,
         'message': f'Viaje cancelado. Motivo: {motivo}',
     })
+
+    # Enviamos una notficacion al pasajero sobre que el conductor ha cancelado el viaje
+    _enviar_notificacion_push(
+        listaUsuarios=[serv.get('usuarioId', '')],
+        listaConductores=[],
+        title='Viaje cancelado por el conductor',
+        body={
+            'action': 'viajeCanceladoConductor',
+            'serviceId': service_id,
+            'estado': 'CANCELADO',
+            'motivo': motivo,
+            'message': f'El conductor ha cancelado el viaje. Motivo: {motivo}',
+        }
+    )
 
     return _ws_ok()
 
@@ -855,6 +1003,19 @@ def iniciar_viaje(event, context):
         'message': 'Viaje iniciado. Lleva al pasajero a su destino.',
     })
 
+    # Enviamos una notficacion al pasajero sobre que el viaje ha iniciado
+    _enviar_notificacion_push(
+        listaUsuarios=[serv.get('usuarioId', '')],
+        listaConductores=[],
+        title='¡Tu viaje ha iniciado!',
+        body={
+            'action': 'viajeIniciado',
+            'serviceId': service_id,
+            'estado': 'EN_CURSO',
+            'message': '¡Viaje iniciado! Ya estás en camino a tu destino.',
+        }
+    )
+
     return _ws_ok()
 
 
@@ -916,6 +1077,21 @@ def completar_viaje(event, context):
         'precioFinal': float(serv.get('precioFinal', 0)),
         'message': 'Viaje completado exitosamente. Puedes calificar al pasajero.',
     })
+
+    # Enviamos una notficacion al pasajero sobre que el viaje ha sido completado
+    _enviar_notificacion_push(
+        listaUsuarios=[serv.get('usuarioId', '')],
+        listaConductores=[],
+        title='¡Tu viaje ha sido completado!',
+        body={
+            'action': 'viajeCompletado',
+            'serviceId': service_id,
+            'estado': 'COMPLETADO',
+            'precioFinal': float(serv.get('precioFinal', 0)),
+            'message': '¡Viaje completado! Gracias por usar MotoRamos. '
+                       'Por favor califica al conductor.',
+        }
+    )
 
     return _ws_ok()
 
@@ -1005,6 +1181,14 @@ def cancelar_servicio(event, context):
     # Confirmar al que canceló
     conn_id = event['requestContext']['connectionId']
     _send_to_connection(apigw, conn_id, cancel_payload)
+
+    # Enviamos una notficacion al pasajero sobre que el viaje ha sido cancelado
+    _enviar_notificacion_push(
+        listaUsuarios=[serv.get('usuarioId', '')],
+        listaConductores=[serv.get('driverId', '')] if serv.get('driverId', 'NONE') != 'NONE' else [],
+        title='Servicio cancelado',
+        body=cancel_payload
+    )
 
     return _ws_ok()
 

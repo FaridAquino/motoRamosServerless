@@ -41,6 +41,8 @@ provider:
     usuariosTable: usuarios
     JWT_SECRET: ${env:JWT_SECRET, 'motoRamos-tarma-jwt-secret-utec-2026'}
     GOOGLE_MAPS_API_KEY: ${env:GOOGLE_MAPS_API_KEY}
+    SNS_TOPIC_ARN: arn:aws:sns:us-east-1:092671055435:send-push-notification-topic
+    Users_Devices: UsersDevicesMotoRamos
 
 package:
   patterns:
