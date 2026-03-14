@@ -39,13 +39,12 @@ provider:
 
 package:
   patterns:
-    - '!node_modules/**'       # Ignorar carpeta de node
-    - '!.serverless/**'        # Ignorar carpeta oculta de despliegue
-    - '!venv/**'               # Ignorar entorno virtual (si tienes uno)
-    - '!__pycache__/**'        # Ignorar archivos compilados de python
+    - '!node_modules/**'
+    - '!.serverless/**'
+    - '!venv/**'
+    - '!__pycache__/**'
     - '!package-lock.json'
-    - ./** # Incluir todo lo demás (tu código + librerías instaladas)
-  
+    - '**'
 
 custom:
   usersDevices: UsersDevicesMotoRamos
