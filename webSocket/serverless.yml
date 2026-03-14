@@ -33,6 +33,12 @@ provider:
             - execute-api:ManageConnections
           Resource:
             - "arn:aws:execute-api:us-east-1:*:*/@connections/*"
+        
+        - Effect: Allow
+          Action:
+            - sns:Publish
+          Resource:
+            - "arn:aws:sns:us-east-1:092671055435:send-push-notification-topic"
 
   environment:
     conexionesTable: conexiones
