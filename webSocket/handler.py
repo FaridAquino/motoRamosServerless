@@ -233,7 +233,7 @@ def _enviar_notificacion_push(listaUsuarios: list, listaConductores: list, body:
         listaUsuarios esperada [userId1,userId2,...].
         listaConductores esperada [driverId1,driverId2,...].
     """
-
+    print("Preparando para enviar notificaciones push...")
     if SNS_TOPIC_ARN:
         try:
             print("--- [SNS] Iniciando proceso de notificación a usuarios ---")
@@ -486,6 +486,8 @@ def servicio_requerido(event, context):
     )
 
     listaConductores = [item['driverId'] for item in response.get('Items', [])]
+
+    print(f"Enviando notificacion")
 
     _enviar_notificacion_push(
         listaUsuarios=[],
