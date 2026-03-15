@@ -537,7 +537,7 @@ def enviar_oferta_conductor(event, context):
     body = _parse_body(event)
     
     print("Oferta conductor - body recibido: ", body)
-    
+
     tablaServicios= dynamodb.Table(SERVICIOS_TABLE)
     
     # Verificar que el servicio exista y esté PENDIENTE
@@ -564,6 +564,7 @@ def enviar_oferta_conductor(event, context):
             'tiempo_segundos': 0,
         }
     
+    print("Informando al usuario...")
     #Notificar al usuario
     apigw = _get_apigw_client(event)
     _notify_user(apigw, body.get('usuarioId', ''), {
@@ -578,6 +579,7 @@ def enviar_oferta_conductor(event, context):
         'ratingConductor': body.get('ratingConductor', 0),
     })
 
+    print("Notificación enviada al usuario.")
     #Notificamos al conductor que su solicitud fue enviada
     conn_id = event['requestContext']['connectionId']
     _send_to_connection(apigw, conn_id, {
