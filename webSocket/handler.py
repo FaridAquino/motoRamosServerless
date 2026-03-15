@@ -819,11 +819,9 @@ def conductor_esperando(event, context):
         listaConductores=[],
         title='Tu conductor ya está esperando',
         body={
-            'action': 'conductorEsperandoConfirmacion',
+            'action': 'conductorEsperando',
             'serviceId': body.get('serviceId', ''),
             'estado': 'ESPERANDO',
-            'ubicacionConductor': body.get('ubicacionConductor', {}),
-            'message': 'Tu conductor ya está esperando en el punto de recojo. Por favor, confirma que estás listo para iniciar el viaje.',
         }
     )
 
@@ -918,7 +916,8 @@ def cancelar_viaje_conductor(event, context):
 # obtenerUbicacionRecojo - Usuario obtiene la ubicación del conductor para el recojo
 # ═══════════════════════════════════════════════════════════════════════════════
 def obtener_ubicacion_recojo(event, context):
-    """El usuario obtiene la ubicación del conductor para el recojo.
+    """
+    El usuario obtiene la ubicación del conductor para el recojo.
 
     Body esperado:
     { "action": "obtenerUbicacionRecojo", "serviceId": "uuid" }
