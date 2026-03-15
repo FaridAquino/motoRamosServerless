@@ -96,7 +96,7 @@ def registerConductor(event, context):
         'totalCalificaciones': Decimal('0'),
         'activo': False,         # Inicia como NO disponible
         'libre': False,          # Estado operativo visible en el frontend del conductor
-        'autorizadoPorAdmin': False,
+        'autorizadoPorAdmin': True,
         'creadoEn': ahora,
     }
 
