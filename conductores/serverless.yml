@@ -99,11 +99,27 @@ functions:
           method: put
           cors: true
 
+  ToggleLibre:
+    handler: handler.toggleLibre
+    events:
+      - http:
+          path: /toggle-libre
+          method: put
+          cors: true
+
   GetHistorialConductor:
     handler: handler.getHistorialConductor
     events:
       - http:
           path: /historial
+          method: get
+          cors: true
+
+  GetSolicitudesViaje:
+    handler: handler.getSolicitudesViaje
+    events:
+      - http:
+          path: /solicitudes-viaje
           method: get
           cors: true
 

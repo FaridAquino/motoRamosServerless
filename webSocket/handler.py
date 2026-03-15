@@ -340,11 +340,11 @@ def disconnect(event, context):
             KeyConditionExpression=Key('userId').eq(driver_id),
         )
         if not remaining.get('Items'):
-            # Última conexión del conductor → desactivar
+            # Última conexión del conductor → desactivar y dejar en ocupado
             dynamodb.Table(CONDUCTORES_TABLE).update_item(
                 Key={'driverId': driver_id},
-                UpdateExpression='SET activo = :val',
-                ExpressionAttributeValues={':val': False},
+                UpdateExpression='SET activo = :a, libre = :l',
+                ExpressionAttributeValues={':a': False, ':l': False},
             )
 
     return {'statusCode': 200, 'body': 'Desconectado'}
@@ -360,7 +360,8 @@ def default_handler(event, context):
     _send_to_connection(apigw, conn_id, {
         'action': 'error',
         'message': 'Acción no reconocida. Acciones válidas: servicioRequerido, '
-                   'aceptarServicio, cancelarServicio, iniciarViaje, completarViaje, '
+                   'enviarOfertaConductor, aceptarOferta, conductorEsperando, '
+                   'cancelarViajeConductor, cancelarServicio, iniciarViaje, completarViaje, '
                    'registrarUbicacionMoto, informar, ping',
     })
     return _ws_ok()
@@ -686,6 +687,7 @@ def aceptar_oferta(event, context):
     _notify_driver(apigw, serv.get('driverId', ''), {
         'action': 'ofertaAceptadaPasajero',
         'serviceId': service_id,
+        'usuarioId': serv.get('usuarioId', ''),
         'estado': 'EN_CAMINO',
         'origen': serv.get('origen', {}),
         'destino': serv.get('destino', {}),
@@ -790,7 +792,10 @@ def conductor_esperando(event, context):
     print("Servicio actualizado a ESPERANDO, notificando al usuario...")
     #notificamos al usuario que el conductor ya está esperando en el punto de recojo
     apigw = _get_apigw_client(event)
-    _notify_user(apigw, body.get('usuarioId', ''), {
+    service_data = tabla.get_item(Key={'serviceId': body.get('serviceId', '')}).get('Item', {})
+    usuario_id = service_data.get('usuarioId', '')
+
+    _notify_user(apigw, usuario_id, {
         'action': 'conductorEsperandoConfirmacion',
         'serviceId': body.get('serviceId', ''),
         'estado': 'ESPERANDO',
@@ -810,7 +815,7 @@ def conductor_esperando(event, context):
 
     # Enviamos una notficacion al pasajero sobre que el conductor ya está esperando en el punto de recojo
     _enviar_notificacion_push(
-        listaUsuarios=[body.get('usuarioId', '')],
+        listaUsuarios=[usuario_id],
         listaConductores=[],
         title='Tu conductor ya está esperando',
         body={

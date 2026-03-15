@@ -1,6 +1,6 @@
 """
 MotoRamos — Microservicio de Conductores
-REST API: Registro, Login, Perfil, Historial, Toggle-activo, Foto S3, Calificar usuario.
+REST API: Registro, Login, Perfil, Historial, Toggle-activo, Toggle-libre, Foto S3, Calificar usuario.
 
 Diseñado para los conductores de mototaxi de Tarma, Junín.
 Todas las contraseñas se almacenan con PBKDF2-SHA256 (600 000 iteraciones).
@@ -14,7 +14,7 @@ import boto3
 from decimal import Decimal
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Key, Attr
 
 from auth_utils import (
     generate_jwt, hash_password, verify_password,
@@ -81,6 +81,7 @@ def registerConductor(event, context):
         'sumaCalificaciones': Decimal('0'),
         'totalCalificaciones': Decimal('0'),
         'activo': False,         # Inicia como NO disponible
+        'libre': False,          # Estado operativo visible en el frontend del conductor
         'autorizadoPorAdmin': False,
         'creadoEn': ahora,
     }
@@ -129,6 +130,15 @@ def loginConductor(event, context):
     if not verify_password(contrasena, conductor.get('contrasenaHasheada', '')):
         return error('Contraseña incorrecta', 401)
 
+    # Al iniciar sesión se marca activo=true y libre=false automáticamente.
+    tabla.update_item(
+        Key={'driverId': conductor['driverId']},
+        UpdateExpression='SET activo = :a, libre = :l',
+        ExpressionAttributeValues={':a': True, ':l': False},
+    )
+    conductor['activo'] = True
+    conductor['libre'] = False
+
     token = generate_jwt({
         'sub': conductor['driverId'],
         'telefono': conductor.get('telefono'),
@@ -142,6 +152,7 @@ def loginConductor(event, context):
         'nombre': conductor.get('nombre'),
         'apellido': conductor.get('apellido'),
         'activo': conductor.get('activo', False),
+        'libre': conductor.get('libre', False),
         'autorizadoPorAdmin': conductor.get('autorizadoPorAdmin', False),
         'token': token,
     })
@@ -280,6 +291,40 @@ def toggleActivo(event, context):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PUT /toggle-libre  (auth) — Estado operativo visible para el conductor
+# ═══════════════════════════════════════════════════════════════════════════════
+@require_auth
+def toggleLibre(event, context):
+    """Actualiza el estado operativo del conductor (LIBRE/OCUPADO).
+    Este estado controla únicamente el comportamiento del frontend en solicitudes."""
+    claims = event['authClaims']
+    body = extract_body(event)
+    if not body or 'libre' not in body:
+        return error('Campo "libre" (true/false) es requerido')
+
+    nuevo_estado = bool(body['libre'])
+    tabla = dynamodb.Table(CONDUCTORES_TABLE)
+
+    # Verificar autorización del admin
+    res = tabla.get_item(Key={'driverId': claims['sub']}, ProjectionExpression='autorizadoPorAdmin')
+    if 'Item' not in res:
+        return error('Conductor no encontrado', 404)
+    if not res['Item'].get('autorizadoPorAdmin', False):
+        return error('Tu cuenta aún no ha sido autorizada por un administrador', 403)
+
+    tabla.update_item(
+        Key={'driverId': claims['sub']},
+        UpdateExpression='SET libre = :l',
+        ExpressionAttributeValues={':l': nuevo_estado},
+    )
+
+    return success({
+        'message': f'Estado operativo actualizado: {"LIBRE" if nuevo_estado else "OCUPADO"}',
+        'libre': nuevo_estado,
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # GET /historial  (auth) — Viajes pasados del conductor
 # ═══════════════════════════════════════════════════════════════════════════════
 @require_auth
@@ -306,6 +351,39 @@ def getHistorialConductor(event, context):
     return success({
         'servicios': result.get('Items', []),
         'count': result.get('Count', 0),
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GET /solicitudes-viaje  (auth) — Solicitudes pendientes visibles para conductor
+# ═══════════════════════════════════════════════════════════════════════════════
+@require_auth
+def getSolicitudesViaje(event, context):
+    """Lista solicitudes de viaje pendientes (estado=PENDIENTE).
+    Se usa para que el conductor pueda revisar/aceptar solicitudes aun estando fuera de línea."""
+    params = event.get('queryStringParameters') or {}
+
+    # Límite defensivo para evitar scans grandes.
+    try:
+        limit = int(params.get('limit', '30'))
+    except (TypeError, ValueError):
+        limit = 30
+    limit = max(1, min(limit, 100))
+
+    tabla = dynamodb.Table(SERVICIOS_TABLE)
+    resp = tabla.scan(
+        FilterExpression=Attr('estado').eq('PENDIENTE'),
+    )
+
+    solicitudes = resp.get('Items', [])
+    solicitudes.sort(key=lambda s: s.get('creadoEn', ''), reverse=True)
+
+    if len(solicitudes) > limit:
+        solicitudes = solicitudes[:limit]
+
+    return success({
+        'solicitudes': solicitudes,
+        'count': len(solicitudes),
     })
 
 

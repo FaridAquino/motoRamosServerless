@@ -44,6 +44,12 @@
         "LogGroupName": "/aws/lambda/api-conductores-motoRamos-dev-GetHistorialConductor"
       }
     },
+    "GetSolicitudesViajeLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/api-conductores-motoRamos-dev-GetSolicitudesViaje"
+      }
+    },
     "CalificarUsuarioLogGroup": {
       "Type": "AWS::Logs::LogGroup",
       "Properties": {
@@ -166,7 +172,7 @@
       "Properties": {
         "Code": {
           "S3Bucket": "serverless-framework-deployments-us-east-1-b61cd490-532f",
-          "S3Key": "serverless/api-conductores-motoRamos/dev/1773130941182-2026-03-10T08:22:21.182Z/api-conductores-motoRamos.zip"
+          "S3Key": "serverless/api-conductores-motoRamos/dev/1773440460570-2026-03-13T22:21:00.570Z/api-conductores-motoRamos.zip"
         },
         "Handler": "handler.registerConductor",
         "Runtime": "python3.12",
@@ -198,7 +204,7 @@
       "Properties": {
         "Code": {
           "S3Bucket": "serverless-framework-deployments-us-east-1-b61cd490-532f",
-          "S3Key": "serverless/api-conductores-motoRamos/dev/1773130941182-2026-03-10T08:22:21.182Z/api-conductores-motoRamos.zip"
+          "S3Key": "serverless/api-conductores-motoRamos/dev/1773440460570-2026-03-13T22:21:00.570Z/api-conductores-motoRamos.zip"
         },
         "Handler": "handler.loginConductor",
         "Runtime": "python3.12",
@@ -230,7 +236,7 @@
       "Properties": {
         "Code": {
           "S3Bucket": "serverless-framework-deployments-us-east-1-b61cd490-532f",
-          "S3Key": "serverless/api-conductores-motoRamos/dev/1773130941182-2026-03-10T08:22:21.182Z/api-conductores-motoRamos.zip"
+          "S3Key": "serverless/api-conductores-motoRamos/dev/1773440460570-2026-03-13T22:21:00.570Z/api-conductores-motoRamos.zip"
         },
         "Handler": "handler.getPerfilConductor",
         "Runtime": "python3.12",
@@ -262,7 +268,7 @@
       "Properties": {
         "Code": {
           "S3Bucket": "serverless-framework-deployments-us-east-1-b61cd490-532f",
-          "S3Key": "serverless/api-conductores-motoRamos/dev/1773130941182-2026-03-10T08:22:21.182Z/api-conductores-motoRamos.zip"
+          "S3Key": "serverless/api-conductores-motoRamos/dev/1773440460570-2026-03-13T22:21:00.570Z/api-conductores-motoRamos.zip"
         },
         "Handler": "handler.updatePerfilConductor",
         "Runtime": "python3.12",
@@ -294,7 +300,7 @@
       "Properties": {
         "Code": {
           "S3Bucket": "serverless-framework-deployments-us-east-1-b61cd490-532f",
-          "S3Key": "serverless/api-conductores-motoRamos/dev/1773130941182-2026-03-10T08:22:21.182Z/api-conductores-motoRamos.zip"
+          "S3Key": "serverless/api-conductores-motoRamos/dev/1773440460570-2026-03-13T22:21:00.570Z/api-conductores-motoRamos.zip"
         },
         "Handler": "handler.getPresignedUploadUrl",
         "Runtime": "python3.12",
@@ -326,7 +332,7 @@
       "Properties": {
         "Code": {
           "S3Bucket": "serverless-framework-deployments-us-east-1-b61cd490-532f",
-          "S3Key": "serverless/api-conductores-motoRamos/dev/1773130941182-2026-03-10T08:22:21.182Z/api-conductores-motoRamos.zip"
+          "S3Key": "serverless/api-conductores-motoRamos/dev/1773440460570-2026-03-13T22:21:00.570Z/api-conductores-motoRamos.zip"
         },
         "Handler": "handler.toggleActivo",
         "Runtime": "python3.12",
@@ -358,7 +364,7 @@
       "Properties": {
         "Code": {
           "S3Bucket": "serverless-framework-deployments-us-east-1-b61cd490-532f",
-          "S3Key": "serverless/api-conductores-motoRamos/dev/1773130941182-2026-03-10T08:22:21.182Z/api-conductores-motoRamos.zip"
+          "S3Key": "serverless/api-conductores-motoRamos/dev/1773440460570-2026-03-13T22:21:00.570Z/api-conductores-motoRamos.zip"
         },
         "Handler": "handler.getHistorialConductor",
         "Runtime": "python3.12",
@@ -385,12 +391,44 @@
         "GetHistorialConductorLogGroup"
       ]
     },
+    "GetSolicitudesViajeLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "S3Bucket": "serverless-framework-deployments-us-east-1-b61cd490-532f",
+          "S3Key": "serverless/api-conductores-motoRamos/dev/1773440460570-2026-03-13T22:21:00.570Z/api-conductores-motoRamos.zip"
+        },
+        "Handler": "handler.getSolicitudesViaje",
+        "Runtime": "python3.12",
+        "FunctionName": "api-conductores-motoRamos-dev-GetSolicitudesViaje",
+        "MemorySize": 1024,
+        "Timeout": 29,
+        "Environment": {
+          "Variables": {
+            "conductoresTable": "conductores",
+            "serviciosTable": "servicios",
+            "usuariosTable": "usuarios",
+            "fotosBucket": "motoramos-fotos-dev",
+            "JWT_SECRET": "motoRamos-tarma-jwt-secret-utec-2026"
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "IamRoleLambdaExecution",
+            "Arn"
+          ]
+        }
+      },
+      "DependsOn": [
+        "GetSolicitudesViajeLogGroup"
+      ]
+    },
     "CalificarUsuarioLambdaFunction": {
       "Type": "AWS::Lambda::Function",
       "Properties": {
         "Code": {
           "S3Bucket": "serverless-framework-deployments-us-east-1-b61cd490-532f",
-          "S3Key": "serverless/api-conductores-motoRamos/dev/1773130941182-2026-03-10T08:22:21.182Z/api-conductores-motoRamos.zip"
+          "S3Key": "serverless/api-conductores-motoRamos/dev/1773440460570-2026-03-13T22:21:00.570Z/api-conductores-motoRamos.zip"
         },
         "Handler": "handler.calificarUsuario",
         "Runtime": "python3.12",
@@ -422,7 +460,7 @@
       "Properties": {
         "Code": {
           "S3Bucket": "serverless-framework-deployments-us-east-1-b61cd490-532f",
-          "S3Key": "serverless/api-conductores-motoRamos/dev/1773130941182-2026-03-10T08:22:21.182Z/api-conductores-motoRamos.zip"
+          "S3Key": "serverless/api-conductores-motoRamos/dev/1773440460570-2026-03-13T22:21:00.570Z/api-conductores-motoRamos.zip"
         },
         "Handler": "handler.getGananciasConductor",
         "Runtime": "python3.12",
@@ -449,94 +487,104 @@
         "GetGananciasConductorLogGroup"
       ]
     },
-    "RegisterConductorLambdaVersionCcoxnz22A3e0PdjujsSf28Bf8oQtHtydUEY3uN1hZlo": {
+    "RegisterConductorLambdaVersiongvL7hotKExNeNaQ3SSA5ZekM11xYdX0KxsRdgxPQRVo": {
       "Type": "AWS::Lambda::Version",
       "DeletionPolicy": "Retain",
       "Properties": {
         "FunctionName": {
           "Ref": "RegisterConductorLambdaFunction"
         },
-        "CodeSha256": "YCe37XhCbz9MgCzy/wwYvHxkS/llIjldHgiNy0WYMIM="
+        "CodeSha256": "4IgGASfJRUrM8DUGJQ6KmtAQkNpaw4QjXp+m2572AxI="
       }
     },
-    "LoginConductorLambdaVersionqR1Lc2xXwbSI6JhtHrGvK4bpyCAAB4aRnVdZfcTrXs": {
+    "LoginConductorLambdaVersionzW2zwyYPVKNaozECTBMn7OPA69p6fkFwLszaPHiWZl4": {
       "Type": "AWS::Lambda::Version",
       "DeletionPolicy": "Retain",
       "Properties": {
         "FunctionName": {
           "Ref": "LoginConductorLambdaFunction"
         },
-        "CodeSha256": "YCe37XhCbz9MgCzy/wwYvHxkS/llIjldHgiNy0WYMIM="
+        "CodeSha256": "4IgGASfJRUrM8DUGJQ6KmtAQkNpaw4QjXp+m2572AxI="
       }
     },
-    "GetPerfilConductorLambdaVersion5tUF5K7twMJY9sCKk1dgLnWNXmvvwJa3ePoBIfsLkI": {
+    "GetPerfilConductorLambdaVersionBGkwg05Xxxcm9Eh7CLfnEBnjTspthm6gROPESEw1g": {
       "Type": "AWS::Lambda::Version",
       "DeletionPolicy": "Retain",
       "Properties": {
         "FunctionName": {
           "Ref": "GetPerfilConductorLambdaFunction"
         },
-        "CodeSha256": "YCe37XhCbz9MgCzy/wwYvHxkS/llIjldHgiNy0WYMIM="
+        "CodeSha256": "4IgGASfJRUrM8DUGJQ6KmtAQkNpaw4QjXp+m2572AxI="
       }
     },
-    "UpdatePerfilConductorLambdaVersion7p8mUwab0FQbcTE1HDpRyM8AN2li1VjEM2ootXobo": {
+    "UpdatePerfilConductorLambdaVersionxdGK2fG2UkLVoj5GYLHvpWMLkoAODTFEtbxNLvmQ4I": {
       "Type": "AWS::Lambda::Version",
       "DeletionPolicy": "Retain",
       "Properties": {
         "FunctionName": {
           "Ref": "UpdatePerfilConductorLambdaFunction"
         },
-        "CodeSha256": "YCe37XhCbz9MgCzy/wwYvHxkS/llIjldHgiNy0WYMIM="
+        "CodeSha256": "4IgGASfJRUrM8DUGJQ6KmtAQkNpaw4QjXp+m2572AxI="
       }
     },
-    "GetPresignedUploadUrlLambdaVersionIHjwsWxjiVwtAX1fa66WN8t8Vsq3Zb7NTkksARvU": {
+    "GetPresignedUploadUrlLambdaVersion98vjRKkhX5AJxyBYlSgSMcbYfdhlPu7Ek9miqYWRo": {
       "Type": "AWS::Lambda::Version",
       "DeletionPolicy": "Retain",
       "Properties": {
         "FunctionName": {
           "Ref": "GetPresignedUploadUrlLambdaFunction"
         },
-        "CodeSha256": "YCe37XhCbz9MgCzy/wwYvHxkS/llIjldHgiNy0WYMIM="
+        "CodeSha256": "4IgGASfJRUrM8DUGJQ6KmtAQkNpaw4QjXp+m2572AxI="
       }
     },
-    "ToggleActivoLambdaVersionCtEUehTfuEfNOFpdB34yUO0as4NXesXG37cS0zJn6I": {
+    "ToggleActivoLambdaVersionFRFcPvxNlPTeRVK33QGEhBmU2bKOfP6sccfmNibeUE": {
       "Type": "AWS::Lambda::Version",
       "DeletionPolicy": "Retain",
       "Properties": {
         "FunctionName": {
           "Ref": "ToggleActivoLambdaFunction"
         },
-        "CodeSha256": "YCe37XhCbz9MgCzy/wwYvHxkS/llIjldHgiNy0WYMIM="
+        "CodeSha256": "4IgGASfJRUrM8DUGJQ6KmtAQkNpaw4QjXp+m2572AxI="
       }
     },
-    "GetHistorialConductorLambdaVersion1WsNgn64NlRsek55LOuN54M9L6Gk7QzboKCgQIzC5w": {
+    "GetHistorialConductorLambdaVersionzYO5lVtC24PIHlYKCwMvYJP5kPQFJUH9M4dHghh4": {
       "Type": "AWS::Lambda::Version",
       "DeletionPolicy": "Retain",
       "Properties": {
         "FunctionName": {
           "Ref": "GetHistorialConductorLambdaFunction"
         },
-        "CodeSha256": "YCe37XhCbz9MgCzy/wwYvHxkS/llIjldHgiNy0WYMIM="
+        "CodeSha256": "4IgGASfJRUrM8DUGJQ6KmtAQkNpaw4QjXp+m2572AxI="
       }
     },
-    "CalificarUsuarioLambdaVersionP4b3A8Prz0e0zVFKbPEYlIQAlsvwLvnaYbDcGAxAY0": {
+    "GetSolicitudesViajeLambdaVersionMGi3P087DqOXCycs1i06SOSAMsr74YdJobgDTBHAk": {
+      "Type": "AWS::Lambda::Version",
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "GetSolicitudesViajeLambdaFunction"
+        },
+        "CodeSha256": "4IgGASfJRUrM8DUGJQ6KmtAQkNpaw4QjXp+m2572AxI="
+      }
+    },
+    "CalificarUsuarioLambdaVersionfYR0cTJ2jG6afC9OOCzNhG3qxzBRCOapBBFmdUbg": {
       "Type": "AWS::Lambda::Version",
       "DeletionPolicy": "Retain",
       "Properties": {
         "FunctionName": {
           "Ref": "CalificarUsuarioLambdaFunction"
         },
-        "CodeSha256": "YCe37XhCbz9MgCzy/wwYvHxkS/llIjldHgiNy0WYMIM="
+        "CodeSha256": "4IgGASfJRUrM8DUGJQ6KmtAQkNpaw4QjXp+m2572AxI="
       }
     },
-    "GetGananciasConductorLambdaVersionJ5swEoC2UoQqOcQtilkkLo2T35jgO9KmyAwt3QF6zg": {
+    "GetGananciasConductorLambdaVersionL0yOup8b2u3bxv7YOZeRG1DzgbrdIUYEr4KYsAY3E": {
       "Type": "AWS::Lambda::Version",
       "DeletionPolicy": "Retain",
       "Properties": {
         "FunctionName": {
           "Ref": "GetGananciasConductorLambdaFunction"
         },
-        "CodeSha256": "YCe37XhCbz9MgCzy/wwYvHxkS/llIjldHgiNy0WYMIM="
+        "CodeSha256": "4IgGASfJRUrM8DUGJQ6KmtAQkNpaw4QjXp+m2572AxI="
       }
     },
     "ApiGatewayRestApi": {
@@ -633,6 +681,21 @@
           ]
         },
         "PathPart": "historial",
+        "RestApiId": {
+          "Ref": "ApiGatewayRestApi"
+        }
+      }
+    },
+    "ApiGatewayResourceSolicitudesDashviaje": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "ParentId": {
+          "Fn::GetAtt": [
+            "ApiGatewayRestApi",
+            "RootResourceId"
+          ]
+        },
+        "PathPart": "solicitudes-viaje",
         "RestApiId": {
           "Ref": "ApiGatewayRestApi"
         }
@@ -932,6 +995,51 @@
         },
         "ResourceId": {
           "Ref": "ApiGatewayResourceHistorial"
+        },
+        "RestApiId": {
+          "Ref": "ApiGatewayRestApi"
+        }
+      }
+    },
+    "ApiGatewayMethodSolicitudesDashviajeOptions": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "AuthorizationType": "NONE",
+        "HttpMethod": "OPTIONS",
+        "MethodResponses": [
+          {
+            "StatusCode": "200",
+            "ResponseParameters": {
+              "method.response.header.Access-Control-Allow-Origin": true,
+              "method.response.header.Access-Control-Allow-Headers": true,
+              "method.response.header.Access-Control-Allow-Methods": true
+            },
+            "ResponseModels": {}
+          }
+        ],
+        "RequestParameters": {},
+        "Integration": {
+          "Type": "MOCK",
+          "RequestTemplates": {
+            "application/json": "{statusCode:200}"
+          },
+          "ContentHandling": "CONVERT_TO_TEXT",
+          "IntegrationResponses": [
+            {
+              "StatusCode": "200",
+              "ResponseParameters": {
+                "method.response.header.Access-Control-Allow-Origin": "'*'",
+                "method.response.header.Access-Control-Allow-Headers": "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent,X-Amzn-Trace-Id'",
+                "method.response.header.Access-Control-Allow-Methods": "'OPTIONS,GET'"
+              },
+              "ResponseTemplates": {
+                "application/json": ""
+              }
+            }
+          ]
+        },
+        "ResourceId": {
+          "Ref": "ApiGatewayResourceSolicitudesDashviaje"
         },
         "RestApiId": {
           "Ref": "ApiGatewayRestApi"
@@ -1350,6 +1458,52 @@
         "GetHistorialConductorLambdaPermissionApiGateway"
       ]
     },
+    "ApiGatewayMethodSolicitudesDashviajeGet": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "HttpMethod": "GET",
+        "RequestParameters": {},
+        "ResourceId": {
+          "Ref": "ApiGatewayResourceSolicitudesDashviaje"
+        },
+        "RestApiId": {
+          "Ref": "ApiGatewayRestApi"
+        },
+        "ApiKeyRequired": false,
+        "AuthorizationType": "NONE",
+        "Integration": {
+          "IntegrationHttpMethod": "POST",
+          "Type": "AWS_PROXY",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":apigateway:",
+                {
+                  "Ref": "AWS::Region"
+                },
+                ":lambda:path/2015-03-31/functions/",
+                {
+                  "Fn::GetAtt": [
+                    "GetSolicitudesViajeLambdaFunction",
+                    "Arn"
+                  ]
+                },
+                "/invocations"
+              ]
+            ]
+          }
+        },
+        "MethodResponses": []
+      },
+      "DependsOn": [
+        "GetSolicitudesViajeLambdaPermissionApiGateway"
+      ]
+    },
     "ApiGatewayMethodCalificarPost": {
       "Type": "AWS::ApiGateway::Method",
       "Properties": {
@@ -1442,7 +1596,7 @@
         "GetGananciasConductorLambdaPermissionApiGateway"
       ]
     },
-    "ApiGatewayDeployment1773130934760": {
+    "ApiGatewayDeployment1773440449096": {
       "Type": "AWS::ApiGateway::Deployment",
       "Properties": {
         "RestApiId": {
@@ -1457,6 +1611,7 @@
         "ApiGatewayMethodPerfilFotoDashurlOptions",
         "ApiGatewayMethodToggleDashactivoOptions",
         "ApiGatewayMethodHistorialOptions",
+        "ApiGatewayMethodSolicitudesDashviajeOptions",
         "ApiGatewayMethodCalificarOptions",
         "ApiGatewayMethodGananciasOptions",
         "ApiGatewayMethodRegisterconductorPost",
@@ -1466,6 +1621,7 @@
         "ApiGatewayMethodPerfilFotoDashurlGet",
         "ApiGatewayMethodToggleDashactivoPut",
         "ApiGatewayMethodHistorialGet",
+        "ApiGatewayMethodSolicitudesDashviajeGet",
         "ApiGatewayMethodCalificarPost",
         "ApiGatewayMethodGananciasGet"
       ]
@@ -1729,6 +1885,43 @@
         }
       }
     },
+    "GetSolicitudesViajeLambdaPermissionApiGateway": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "GetSolicitudesViajeLambdaFunction",
+            "Arn"
+          ]
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":execute-api:",
+              {
+                "Ref": "AWS::Region"
+              },
+              ":",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              ":",
+              {
+                "Ref": "ApiGatewayRestApi"
+              },
+              "/*/*"
+            ]
+          ]
+        }
+      }
+    },
     "CalificarUsuarioLambdaPermissionApiGateway": {
       "Type": "AWS::Lambda::Permission",
       "Properties": {
@@ -1814,7 +2007,7 @@
     "RegisterConductorLambdaFunctionQualifiedArn": {
       "Description": "Current Lambda function version",
       "Value": {
-        "Ref": "RegisterConductorLambdaVersionCcoxnz22A3e0PdjujsSf28Bf8oQtHtydUEY3uN1hZlo"
+        "Ref": "RegisterConductorLambdaVersiongvL7hotKExNeNaQ3SSA5ZekM11xYdX0KxsRdgxPQRVo"
       },
       "Export": {
         "Name": "sls-api-conductores-motoRamos-dev-RegisterConductorLambdaFunctionQualifiedArn"
@@ -1823,7 +2016,7 @@
     "LoginConductorLambdaFunctionQualifiedArn": {
       "Description": "Current Lambda function version",
       "Value": {
-        "Ref": "LoginConductorLambdaVersionqR1Lc2xXwbSI6JhtHrGvK4bpyCAAB4aRnVdZfcTrXs"
+        "Ref": "LoginConductorLambdaVersionzW2zwyYPVKNaozECTBMn7OPA69p6fkFwLszaPHiWZl4"
       },
       "Export": {
         "Name": "sls-api-conductores-motoRamos-dev-LoginConductorLambdaFunctionQualifiedArn"
@@ -1832,7 +2025,7 @@
     "GetPerfilConductorLambdaFunctionQualifiedArn": {
       "Description": "Current Lambda function version",
       "Value": {
-        "Ref": "GetPerfilConductorLambdaVersion5tUF5K7twMJY9sCKk1dgLnWNXmvvwJa3ePoBIfsLkI"
+        "Ref": "GetPerfilConductorLambdaVersionBGkwg05Xxxcm9Eh7CLfnEBnjTspthm6gROPESEw1g"
       },
       "Export": {
         "Name": "sls-api-conductores-motoRamos-dev-GetPerfilConductorLambdaFunctionQualifiedArn"
@@ -1841,7 +2034,7 @@
     "UpdatePerfilConductorLambdaFunctionQualifiedArn": {
       "Description": "Current Lambda function version",
       "Value": {
-        "Ref": "UpdatePerfilConductorLambdaVersion7p8mUwab0FQbcTE1HDpRyM8AN2li1VjEM2ootXobo"
+        "Ref": "UpdatePerfilConductorLambdaVersionxdGK2fG2UkLVoj5GYLHvpWMLkoAODTFEtbxNLvmQ4I"
       },
       "Export": {
         "Name": "sls-api-conductores-motoRamos-dev-UpdatePerfilConductorLambdaFunctionQualifiedArn"
@@ -1850,7 +2043,7 @@
     "GetPresignedUploadUrlLambdaFunctionQualifiedArn": {
       "Description": "Current Lambda function version",
       "Value": {
-        "Ref": "GetPresignedUploadUrlLambdaVersionIHjwsWxjiVwtAX1fa66WN8t8Vsq3Zb7NTkksARvU"
+        "Ref": "GetPresignedUploadUrlLambdaVersion98vjRKkhX5AJxyBYlSgSMcbYfdhlPu7Ek9miqYWRo"
       },
       "Export": {
         "Name": "sls-api-conductores-motoRamos-dev-GetPresignedUploadUrlLambdaFunctionQualifiedArn"
@@ -1859,7 +2052,7 @@
     "ToggleActivoLambdaFunctionQualifiedArn": {
       "Description": "Current Lambda function version",
       "Value": {
-        "Ref": "ToggleActivoLambdaVersionCtEUehTfuEfNOFpdB34yUO0as4NXesXG37cS0zJn6I"
+        "Ref": "ToggleActivoLambdaVersionFRFcPvxNlPTeRVK33QGEhBmU2bKOfP6sccfmNibeUE"
       },
       "Export": {
         "Name": "sls-api-conductores-motoRamos-dev-ToggleActivoLambdaFunctionQualifiedArn"
@@ -1868,16 +2061,25 @@
     "GetHistorialConductorLambdaFunctionQualifiedArn": {
       "Description": "Current Lambda function version",
       "Value": {
-        "Ref": "GetHistorialConductorLambdaVersion1WsNgn64NlRsek55LOuN54M9L6Gk7QzboKCgQIzC5w"
+        "Ref": "GetHistorialConductorLambdaVersionzYO5lVtC24PIHlYKCwMvYJP5kPQFJUH9M4dHghh4"
       },
       "Export": {
         "Name": "sls-api-conductores-motoRamos-dev-GetHistorialConductorLambdaFunctionQualifiedArn"
       }
     },
+    "GetSolicitudesViajeLambdaFunctionQualifiedArn": {
+      "Description": "Current Lambda function version",
+      "Value": {
+        "Ref": "GetSolicitudesViajeLambdaVersionMGi3P087DqOXCycs1i06SOSAMsr74YdJobgDTBHAk"
+      },
+      "Export": {
+        "Name": "sls-api-conductores-motoRamos-dev-GetSolicitudesViajeLambdaFunctionQualifiedArn"
+      }
+    },
     "CalificarUsuarioLambdaFunctionQualifiedArn": {
       "Description": "Current Lambda function version",
       "Value": {
-        "Ref": "CalificarUsuarioLambdaVersionP4b3A8Prz0e0zVFKbPEYlIQAlsvwLvnaYbDcGAxAY0"
+        "Ref": "CalificarUsuarioLambdaVersionfYR0cTJ2jG6afC9OOCzNhG3qxzBRCOapBBFmdUbg"
       },
       "Export": {
         "Name": "sls-api-conductores-motoRamos-dev-CalificarUsuarioLambdaFunctionQualifiedArn"
@@ -1886,7 +2088,7 @@
     "GetGananciasConductorLambdaFunctionQualifiedArn": {
       "Description": "Current Lambda function version",
       "Value": {
-        "Ref": "GetGananciasConductorLambdaVersionJ5swEoC2UoQqOcQtilkkLo2T35jgO9KmyAwt3QF6zg"
+        "Ref": "GetGananciasConductorLambdaVersionL0yOup8b2u3bxv7YOZeRG1DzgbrdIUYEr4KYsAY3E"
       },
       "Export": {
         "Name": "sls-api-conductores-motoRamos-dev-GetGananciasConductorLambdaFunctionQualifiedArn"
