@@ -525,7 +525,12 @@ def enviar_oferta_conductor(event, context):
       "ubicaciónConductor": {"lat": -11.4198, "lng": -75.6896},
       "ubicaciónPasajero": {"lat": -11.4198, "lng": -75.6896},
       "precioOfrecido": 2.00,
-      "nombreConductor": "Juan Pérez"
+      "nombreConductor": "Juan Pérez",
+      "placaConductor": "ABC-123",
+      "marcaMoto": "Yamaha",
+      "numeroMoto": "12345",
+      "colorMoto": "Rojo",
+      "ratingConductor": 4.5
     }
     """
     claims = _get_claims(event)
@@ -613,6 +618,12 @@ def aceptar_oferta(event, context):
       "action": "aceptarOferta",
       "usuariosId": "uuid-del-usuario",
       "conductorId": "uuid-del-conductor",
+      "nombreConductor": "Juan Pérez",
+      "placaConductor": "ABC-123",
+      "numeroMoto": "12345",
+      "marcaMoto": "Yamaha",
+      "colorMoto": "Rojo",
+      "ratingConductor": 4.5,
       "serviceId": "uuid-del-servicio",
       "precioOfrecido": 5.00
     }
@@ -647,7 +658,8 @@ def aceptar_oferta(event, context):
             UpdateExpression=(
                 'SET driverId = :d, estado = :e, nombreConductor = :nc, '
                 'telefonoConductor = :tc, placaConductor = :pl, '
-                'precioFinal = :pf, aceptadoEn = :t, actualizadoEn = :t'
+                'precioFinal = :pf, aceptadoEn = :t, actualizadoEn = :t, '
+                'numeroMoto = :nm, colorMoto = :cm, ratingConductor = :rc, marcaMoto = :mk'
             ),
             ConditionExpression='estado = :pendiente AND driverId = :none',
             ExpressionAttributeValues={
@@ -660,6 +672,10 @@ def aceptar_oferta(event, context):
                 ':pl': driver_data.get('placa', ''),
                 ':pf': Decimal(str(body.get('precioOfrecido', 0))),
                 ':t': ahora,
+                ':nm': body.get('numeroMoto', ''),
+                ':cm': body.get('colorMoto', ''),
+                ':rc': Decimal(str(body.get('ratingConductor', 0))),
+                ':mk': body.get('marcaMoto', ''),
             },
         )
     except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:

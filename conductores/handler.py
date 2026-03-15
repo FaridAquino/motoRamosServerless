@@ -35,7 +35,20 @@ ZONA_PERU = ZoneInfo('America/Lima')
 # POST /registerConductor  (público)
 # ═══════════════════════════════════════════════════════════════════════════════
 def registerConductor(event, context):
-    """Registra un nuevo conductor de mototaxi. Devuelve token JWT."""
+    """Registra un nuevo conductor de mototaxi. Devuelve token JWT.
+    body esperado:
+        {
+            nombre: Juan,
+            apellido: David,
+            numeroMoto: 432,
+            marca: Honda,
+            color: Rojo,
+            placa: ABC-123,
+            telefono: 987654321,
+            contrasena: password123,
+            
+        }
+    """
     body = extract_body(event)
     if not body:
         return error('Falta el body de la solicitud')
@@ -78,6 +91,7 @@ def registerConductor(event, context):
         'fotoUrl': '',
         'marca': body.get('marca', ''),
         'color': body.get('color', ''),
+        'numeroMoto': body.get('numeroMoto', ''),
         'sumaCalificaciones': Decimal('0'),
         'totalCalificaciones': Decimal('0'),
         'activo': False,         # Inicia como NO disponible
