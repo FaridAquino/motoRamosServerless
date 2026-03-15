@@ -316,3 +316,42 @@ def calificarConductor(event, context):
         )
 
     return success({'message': 'Calificación registrada exitosamente'})
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GET /informacion_servicio (auth) — Obtener información de un servicio específico
+# ═══════════════════════════════════════════════════════════════════════════════
+@require_auth
+def getInformacionServicio(event, context):
+    """Devuelve detalles de un servicio específico, incluyendo estado y ubicación del conductor.
+        body esperado:
+        {
+            "serviceId": "12345"
+        }
+    """
+    claims = event['authClaims']
+    body = extract_body(event)
+    service_id = body.get('serviceId')
+
+    if not service_id:
+        return error('serviceId es requerido')
+
+    tabla_serv = dynamodb.Table(SERVICIOS_TABLE)
+    result = tabla_serv.get_item(Key={'serviceId': service_id})
+    if 'Item' not in result:
+        return error('Servicio no encontrado', 404)
+
+    serv = result['Item']
+    if serv.get('usuarioId') != claims['sub']:
+        return error('No autorizado para ver este servicio', 403)
+
+    return success({
+        'serviceId': serv.get('serviceId'),
+        'driverId': serv.get('driverId'),
+        'nombreConductor': serv.get('nombreConductor'),
+        'placaConductor': serv.get('placaConductor'),
+        'colorVehiculo': serv.get('colorVehiculo', ''),
+        'numeroVehiculo': serv.get('numeroVehiculo', ''),
+        'ubicacionConductor': serv.get('ubicacionConductor', {}),
+        'origen': serv.get('origen', {}),
+        'destino': serv.get('destino', {}),
+    })

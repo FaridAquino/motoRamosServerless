@@ -814,7 +814,7 @@ def conductor_esperando(event, context):
         listaConductores=[],
         title='Tu conductor ya está esperando',
         body={
-            'action': 'conductorEsperandoConfirmacion',
+            'action': 'conductorEsperando',
             'serviceId': body.get('serviceId', ''),
             'estado': 'ESPERANDO',
             'ubicacionConductor': body.get('ubicacionConductor', {}),
