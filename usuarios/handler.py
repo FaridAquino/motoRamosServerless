@@ -344,7 +344,7 @@ def getInformacionServicio(event, context):
         'serviceId': serv.get('serviceId'),
         'driverId': serv.get('driverId'),
         'nombreConductor': serv.get('nombreConductor'),
-        'placaConductor': serv.get('placaConductor'),
+        'placaMoto': serv.get('placaMoto', ''),
         'telefonoConductor': serv.get('telefonoConductor', ''),
         'numeroMoto': serv.get('numeroMoto', ''),
         'colorMoto': serv.get('colorMoto', ''),

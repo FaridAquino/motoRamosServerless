@@ -525,11 +525,6 @@ def enviar_oferta_conductor(event, context):
       "ubicaciónConductor": {"lat": -11.4198, "lng": -75.6896},
       "ubicaciónPasajero": {"lat": -11.4198, "lng": -75.6896},
       "precioOfrecido": 2.00,
-      "nombreConductor": "Juan Pérez",
-      "placaConductor": "ABC-123",
-      "marcaMoto": "Yamaha",
-      "numeroMoto": "12345",
-      "colorMoto": "Rojo",
       "ratingConductor": 4.5
     }
     """
@@ -618,13 +613,8 @@ def aceptar_oferta(event, context):
       "action": "aceptarOferta",
       "usuarioId": "uuid-del-usuario",
       "conductorId": "uuid-del-conductor",
-      "nombreConductor": "Juan Pérez",
-      "placaConductor": "ABC-123",
-      "numeroMoto": "12345",
-      "marcaMoto": "Yamaha",
-      "colorMoto": "Rojo",
-      "ratingConductor": 4.5,
       "serviceId": "uuid-del-servicio",
+      "ratingConductor": 4.5,
       "precioOfrecido": 5.00
     }
     """
@@ -649,10 +639,19 @@ def aceptar_oferta(event, context):
     # Obtener datos del conductor
     driver_res = tabla_cond.get_item(
         Key={'driverId': body.get('conductorId', '')},
-        ProjectionExpression='driverId, nombre, apellido, telefono, placa, marca, color, fotoUrl, '
+        ProjectionExpression='driverId, nombre, apellido, telefono, placa, marca, color, numeroMoto, fotoUrl, '
                              'sumaCalificaciones, totalCalificaciones',
     )
+
     driver_data = driver_res.get('Item', {})
+
+    total = int(driver_data.get('totalCalificaciones', 0))
+    if total > 0:
+        driver_data['calificacionPromedio'] = round(
+            float(driver_data.get('sumaCalificaciones', 0)) / total, 2
+        )
+    else:
+        driver_data['calificacionPromedio'] = 5.0
 
     # Asignación atómica: solo funciona si estado=PENDIENTE y driverId=NONE
     try:
@@ -660,7 +659,7 @@ def aceptar_oferta(event, context):
             Key={'serviceId': service_id},
             UpdateExpression=(
                 'SET driverId = :d, estado = :e, nombreConductor = :nc, '
-                'telefonoConductor = :tc, placaConductor = :pl, '
+                'telefonoConductor = :tc, placaMoto = :pm, '
                 'precioFinal = :pf, aceptadoEn = :t, actualizadoEn = :t, '
                 'numeroMoto = :nm, colorMoto = :cm, ratingConductor = :rc, marcaMoto = :mk'
             ),
@@ -672,13 +671,13 @@ def aceptar_oferta(event, context):
                 ':none': 'NONE',
                 ':nc': driver_data.get('nombre', '') + ' ' + driver_data.get('apellido', ''),
                 ':tc': driver_data.get('telefono', ''),
-                ':pl': driver_data.get('placa', ''),
+                ':pm': driver_data.get('placa', ''),
                 ':pf': Decimal(str(body.get('precioOfrecido', 0))),
                 ':t': ahora,
-                ':nm': body.get('numeroMoto', ''),
-                ':cm': body.get('colorMoto', ''),
-                ':rc': Decimal(str(body.get('ratingConductor', 0))),
-                ':mk': body.get('marcaMoto', ''),
+                ':nm': driver_data.get('numeroMoto', ''),
+                ':cm': driver_data.get('color', ''),
+                ':rc': Decimal(str(driver_data.get('calificacionPromedio', 0))),
+                ':mk': driver_data.get('marca', ''),
             },
         )
     except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
@@ -696,10 +695,6 @@ def aceptar_oferta(event, context):
     serv = serv_result.get('Item', {})
 
     apigw = _get_apigw_client(event)
-
-    # Calcular calificación promedio del conductor
-    total_cal = int(driver_data.get('totalCalificaciones', 0))
-    prom = round(float(driver_data.get('sumaCalificaciones', 0)) / total_cal, 2) if total_cal > 0 else 5.0
 
     # Notificar al conductor
     print("hasta aqui todo bien: "+ str(serv.get('driverId', '')))
@@ -723,14 +718,15 @@ def aceptar_oferta(event, context):
         'estado': 'EN_CAMINO',
         'conductor': {
             'driverId': body.get('conductorId', ''),
-            'nombre': driver_data.get('nombre', ''),
-            'apellido': driver_data.get('apellido', ''),
-            'telefono': driver_data.get('telefono', ''),
-            'placa': driver_data.get('placa', ''),
-            'marca': driver_data.get('marca', ''),
-            'color': driver_data.get('color', ''),
+            'nombreConductor': driver_data.get('nombre', ''),
+            'apellidoConductor': driver_data.get('apellido', ''),
+            'telefonoConductor': driver_data.get('telefono', ''),
+            'placaMoto': driver_data.get('placa', ''),
+            'marcaMoto': driver_data.get('marca', ''),
+            'colorMoto': driver_data.get('color', ''),
             'fotoUrl': driver_data.get('fotoUrl', ''),
-            'calificacion': prom,
+            'numeroMoto': driver_data.get('numeroMoto', ''),
+            'calificacionConductor': driver_data.get('calificacionPromedio', 3.7),
         },
         'precioFinal': float(serv.get('precioFinal', 0)),
         'message': '¡Tu conductor está en camino!'
@@ -745,8 +741,6 @@ def aceptar_oferta(event, context):
             'action': 'ofertaAceptadaPasajero',
             'serviceId': service_id,
             'estado': 'EN_CAMINO',
-            'origen': serv.get('origen', {}),
-            'destino': serv.get('destino', {}),
             'nombreUsuario': serv.get('nombreUsuario', ''),
             'precioFinal': float(serv.get('precioFinal', 0)),
             'message': '¡Tu oferta fue aceptada por el pasajero! Ve al punto de recojo.'
