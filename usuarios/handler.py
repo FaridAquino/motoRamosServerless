@@ -323,14 +323,10 @@ def calificarConductor(event, context):
 @require_auth
 def getInformacionServicio(event, context):
     """Devuelve detalles de un servicio específico, incluyendo estado y ubicación del conductor.
-        body esperado:
-        {
-            "serviceId": "12345"
-        }
+        https://moto-ramos.com/usuarios/servicio?serviceId=12345
     """
     claims = event['authClaims']
-    body = extract_body(event)
-    service_id = body.get('serviceId')
+    service_id = event.get('queryStringParameters', {}).get('serviceId')
 
     if not service_id:
         return error('serviceId es requerido')
