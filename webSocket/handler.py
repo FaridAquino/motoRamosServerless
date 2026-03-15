@@ -571,6 +571,7 @@ def enviar_oferta_conductor(event, context):
         'tiempoLlegada': informacionDistancia.get('tiempo_texto', "0"),
         'precioOfrecido': body.get('precioOfrecido', 0),
         'nombreConductor': body.get('nombreConductor', ''),
+        'ratingConductor': body.get('ratingConductor', 0),
     })
 
     #Notificamos al conductor que su solicitud fue enviada
@@ -591,9 +592,6 @@ def enviar_oferta_conductor(event, context):
             'action': 'nuevaOfertaConductor',
             'serviceId': body.get('serviceId', ''),
             'conductorId': body.get('conductorId', ''),
-            'ubicaciónConductor': body.get('ubicaciónConductor', {}),
-            'distancia': informacionDistancia.get('distancia_texto', "0"),
-            'tiempoLlegada': informacionDistancia.get('tiempo_texto', "0"),
             'precioOfrecido': body.get('precioOfrecido', 0),
             'nombreConductor': body.get('nombreConductor', ''),
         }
