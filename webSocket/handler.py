@@ -520,12 +520,14 @@ def enviar_oferta_conductor(event, context):
     {
       "action": "enviarOfertaConductor",
       "conductorId": "uuid-del-conductor",
+      "nombreConductor": "Nombre del conductor",
+      "ratingConductor": 4.5,
       "usuarioId": "uuid-del-usuario",
       "serviceId": "uuid-del-servicio",
       "ubicaciónConductor": {"lat": -11.4198, "lng": -75.6896},
       "ubicaciónPasajero": {"lat": -11.4198, "lng": -75.6896},
       "precioOfrecido": 2.00,
-      "ratingConductor": 4.5
+      
     }
     """
     claims = _get_claims(event)
@@ -533,7 +535,9 @@ def enviar_oferta_conductor(event, context):
         print(f"Intento de solicitudServicioRequerido por rol {claims['rol']}")
         return _ws_error('Solo conductores pueden solicitar aceptar servicios', 403)
     body = _parse_body(event)
-
+    
+    print("Oferta conductor - body recibido: ", body)
+    
     tablaServicios= dynamodb.Table(SERVICIOS_TABLE)
     
     # Verificar que el servicio exista y esté PENDIENTE
