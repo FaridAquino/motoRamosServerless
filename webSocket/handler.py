@@ -616,7 +616,7 @@ def aceptar_oferta(event, context):
     Body esperado:
     {
       "action": "aceptarOferta",
-      "usuariosId": "uuid-del-usuario",
+      "usuarioId": "uuid-del-usuario",
       "conductorId": "uuid-del-conductor",
       "nombreConductor": "Juan Pérez",
       "placaConductor": "ABC-123",
@@ -628,6 +628,9 @@ def aceptar_oferta(event, context):
       "precioOfrecido": 5.00
     }
     """
+    print("Aceptar oferta - evento recibido: ", event)
+    print("Body recibido: ", event.get('body', ''))
+    
     claims = _get_claims(event)
     if not claims:
         return _ws_error('No autenticado', 401)
