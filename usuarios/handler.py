@@ -350,4 +350,5 @@ def getInformacionServicio(event, context):
         'ubicacionConductor': serv.get('ubicacionConductor', {}),
         'origen': serv.get('origen', {}),
         'destino': serv.get('destino', {}),
+        'precioFinal': serv.get('precioFinal', 0),
     })
