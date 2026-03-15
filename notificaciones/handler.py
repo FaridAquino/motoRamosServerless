@@ -116,9 +116,31 @@ def _enviar_notificaciones_fcm(tokens_to_send, titulo, body_data):
     enviados = 0
     errores = 0
 
-    precio = body_data.get('precioSugerido', '0.00')
-    texto_visible = f"Nuevo viaje por S/{precio}"
+    if body_data.get('action') == 'nuevoServicio':
+        precio = body_data.get('precioSugerido', '0.00')
+        texto_visible = f"Nuevo viaje por S/{precio}"
+    
+    elif body_data.get('action') == 'nuevaOfertaConductor':
+        texto_visible = "¡Tienes un conductor que está interesado en tu servicio!"
+    
+    elif body_data.get('action') == 'ofertaAceptadaPasajero':
+        texto_visible = "¡Tu oferta ha sido aceptada por el pasajero!"
 
+    elif body_data.get('action') == 'viajeCanceladoConductor':
+        texto_visible = "Tu viaje ha sido cancelado por el conductor."
+
+    elif body_data.get('action') == 'servicioCancelado':
+        texto_visible = "El servicio ah sido cancelado por el usuario."
+    
+    elif body_data.get('action') == 'conductorEsperando':
+        texto_visible = "El conductor ha llegado al punto de origen y está esperando."
+
+    elif body_data.get('action') == 'viajeIniciado':
+        texto_visible = "Tu viaje ha comenzado. ¡Buen viaje!"
+    
+    elif body_data.get('action') == 'Tu viaje ha sido completado':
+        texto_visible = "Tu viaje ha sido completado. ¡Gracias por usar MotoRamos!"
+    
     body_string = json.dumps(body_data)
 
     for token in tokens_to_send:
