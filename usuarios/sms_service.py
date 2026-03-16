@@ -18,6 +18,9 @@ def enviar_codigo_sms(telefono: str) -> dict:
     codigo = generar_codigo()
     expira_en = int(time.time()) + 300  # 5 minutos
 
+    print(f"📱 Enviando SMS a: {telefono_formateado}")
+    print(f"🔑 Código generado: {codigo}")
+
     # Guardar en DynamoDB
     otp_table.put_item(Item={
         'telefono': telefono,
@@ -42,11 +45,14 @@ def enviar_codigo_sms(telefono: str) -> dict:
                 }
             }
         )
+        print(f"✅ SMS enviado correctamente. MessageId")
         return {'success': True}
     except Exception as e:
+        print(f"❌ Error al enviar SMS: {str(e)}")
         return {'success': False, 'error': str(e)}
 
 def verificar_codigo(telefono: str, codigo: str) -> dict:
+    print(f"🔍 Verificando código para: {telefono}, código ingresado: {codigo}")
     try:
         response = otp_table.get_item(Key={'telefono': telefono})
         item = response.get('Item')
