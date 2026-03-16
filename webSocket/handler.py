@@ -8,13 +8,13 @@ Incluye reconexión robusta y operaciones DynamoDB atómicas para evitar duplici
 
 Flujo de un servicio:
   1. Pasajero envía 'servicioRequerido' → se crea servicio PENDIENTE
-  2. Conductores activos reciben la notificación → mandan 'aceptarServicio'
-  3. Se transmite el servicio a todos los conductores en estado "TRABAJANDO" → estado EN_CAMINO
-  4. Conductor actualiza ubicación con 'registrarUbicacionMoto'
-  5. Conductor envía 'iniciarViaje' cuando recoge al pasajero → EN_CURSO
-  6. Conductor envía 'completarViaje' al llegar a destino → COMPLETADO
-  7. Cualquiera puede enviar 'cancelarServicio' antes de EN_CURSO → CANCELADO
-  8. 'informar' → envío genérico de mensajes entre pasajero y conductor
+    2. Conductores activos reciben la notificación → mandan 'enviarOfertaConductor'
+    3. Pasajero acepta oferta con 'aceptarOferta' → estado EN_CAMINO
+    4. Conductor envía 'conductorEsperando' al llegar a recojo → estado ESPERANDO
+    5. Conductor envía 'iniciarViaje' cuando recoge al pasajero → EN_CURSO
+    6. Conductor envía 'completarViaje' al llegar a destino → COMPLETADO
+    7. Cualquiera puede enviar 'cancelarServicio' antes de EN_CURSO → CANCELADO
+    8. 'informar' → envío genérico de mensajes entre pasajero y conductor
 """
 
 import json
@@ -531,6 +531,8 @@ def enviar_oferta_conductor(event, context):
     }
     """
     claims = _get_claims(event)
+    if not claims:
+        return _ws_error('No autenticado', 401)
     if claims['rol'] != 'CONDUCTOR':
         print(f"Intento de solicitudServicioRequerido por rol {claims['rol']}")
         return _ws_error('Solo conductores pueden solicitar aceptar servicios', 403)
@@ -538,21 +540,60 @@ def enviar_oferta_conductor(event, context):
     
     print("Oferta conductor - body recibido: ", body)
 
+    service_id = body.get('serviceId', '')
+    usuario_id = body.get('usuarioId', '')
+    conductor_id = claims['sub']
+    ubicacion_conductor_raw = body.get('ubicaciónConductor') or body.get('ubicacionConductor')
+    ubicacion_pasajero_raw = body.get('ubicaciónPasajero') or body.get('ubicacionPasajero')
+
+    if not service_id or not usuario_id:
+        return _ws_error('serviceId y usuarioId son requeridos')
+    if not ubicacion_conductor_raw or not ubicacion_pasajero_raw:
+        return _ws_error('ubicaciónConductor y ubicaciónPasajero son requeridas')
+
+    try:
+        precio_ofrecido = Decimal(str(body.get('precioOfrecido', 0)))
+    except Exception:
+        return _ws_error('precioOfrecido debe ser numérico')
+
+    # Evita suplantación de identidad del conductor en el payload.
+    if body.get('conductorId') and body.get('conductorId') != conductor_id:
+        return _ws_error('conductorId no coincide con el token autenticado', 403)
+
     tablaServicios= dynamodb.Table(SERVICIOS_TABLE)
+    tablaConductores = dynamodb.Table(CONDUCTORES_TABLE)
     
     # Verificar que el servicio exista y esté PENDIENTE
-    result = tablaServicios.get_item(Key={'serviceId': body.get('serviceId', '')})
+    result = tablaServicios.get_item(Key={'serviceId': service_id})
 
     if not result.get('Item'):
         return _ws_error('Servicio no encontrado o ya no está disponible', 404)
     if result['Item']['estado'] != 'PENDIENTE':
         return _ws_error('Servicio no está disponible para aceptar', 400)
 
+    conductor_info = tablaConductores.get_item(
+        Key={'driverId': conductor_id},
+        ProjectionExpression='nombre, apellido, sumaCalificaciones, totalCalificaciones',
+    ).get('Item', {})
+
+    total_calif = int(conductor_info.get('totalCalificaciones', 0))
+    if total_calif > 0:
+        rating_conductor = round(
+            float(conductor_info.get('sumaCalificaciones', 0)) / total_calif,
+            2,
+        )
+    else:
+        rating_conductor = 5.0
+
+    nombre_conductor = f"{conductor_info.get('nombre', '')} {conductor_info.get('apellido', '')}".strip()
+    if not nombre_conductor:
+        nombre_conductor = claims.get('nombre', '')
+
     informacionDistancia = _obtener_distancia_tiempo(
-        body.get('ubicaciónConductor', {}).get('lat'),
-        body.get('ubicaciónConductor', {}).get('lng'),
-        body.get('ubicaciónPasajero', {}).get('lat'),
-        body.get('ubicaciónPasajero', {}).get('lng'),
+        ubicacion_conductor_raw.get('lat'),
+        ubicacion_conductor_raw.get('lng'),
+        ubicacion_pasajero_raw.get('lat'),
+        ubicacion_pasajero_raw.get('lng'),
     )
 
     if informacionDistancia is None:
@@ -567,16 +608,16 @@ def enviar_oferta_conductor(event, context):
     print("Informando al usuario...")
     #Notificar al usuario
     apigw = _get_apigw_client(event)
-    _notify_user(apigw, body.get('usuarioId', ''), {
+    _notify_user(apigw, usuario_id, {
         'action': 'nuevaOfertaConductor',
-        'serviceId': body.get('serviceId', ''),
-        'conductorId': body.get('conductorId', ''),
-        'ubicaciónConductor': body.get('ubicaciónConductor', {}),
+        'serviceId': service_id,
+        'conductorId': conductor_id,
+        'ubicaciónConductor': ubicacion_conductor_raw,
         'distancia': informacionDistancia.get('distancia_texto', "0"),
         'tiempoLlegada': informacionDistancia.get('tiempo_texto', "0"),
-        'precioOfrecido': body.get('precioOfrecido', 0),
-        'nombreConductor': body.get('nombreConductor', ''),
-        'ratingConductor': body.get('ratingConductor', 0),
+        'precioOfrecido': float(precio_ofrecido),
+        'nombreConductor': nombre_conductor,
+        'ratingConductor': rating_conductor,
     })
 
     print("Notificación enviada al usuario.")
@@ -584,22 +625,22 @@ def enviar_oferta_conductor(event, context):
     conn_id = event['requestContext']['connectionId']
     _send_to_connection(apigw, conn_id, {
         'action': 'ofertaEnviadaConfirmacion',
-        'serviceId': body.get('serviceId', ''),
+        'serviceId': service_id,
         'estado': 'PENDIENTE',
         'message': 'Esperando la respuesta del pasajero...',
     })
 
     # Envia notificacion push al usuario sobre la nueva oferta del conductor
     _enviar_notificacion_push(
-        listaUsuarios=[body.get('usuarioId', '')],
+        listaUsuarios=[usuario_id],
         listaConductores=[],
         title='Nuevo oferta de un conductor',
         body={
             'action': 'nuevaOfertaConductor',
-            'serviceId': body.get('serviceId', ''),
-            'conductorId': body.get('conductorId', ''),
-            'precioOfrecido': body.get('precioOfrecido', 0),
-            'nombreConductor': body.get('nombreConductor', ''),
+            'serviceId': service_id,
+            'conductorId': conductor_id,
+            'precioOfrecido': float(precio_ofrecido),
+            'nombreConductor': nombre_conductor,
         }
     )
     
@@ -762,7 +803,7 @@ def conductor_esperando(event, context):
     Body esperado:
     {
       "action": "conductorEsperando",
-      "usuariosId": "uuid-del-usuario",
+    "usuarioId": "uuid-del-usuario",
       "conductorId": "uuid-del-conductor",
       "ubicacionConductor": {"lat": -11.4198, "lng": -75.6896},
       "serviceId": "uuid-del-servicio",

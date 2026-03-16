@@ -11,6 +11,7 @@ import json
 import os
 import uuid
 import boto3
+import re
 from decimal import Decimal
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -53,10 +54,14 @@ def registerConductor(event, context):
     if not body:
         return error('Falta el body de la solicitud')
 
-    required = ['nombre', 'apellido', 'telefono', 'contrasena', 'placa']
+    required = ['nombre', 'apellido', 'telefono', 'contrasena', 'placa', 'numeroMoto']
     missing = [f for f in required if f not in body or not body[f]]
     if missing:
         return error(f'Campos requeridos faltantes: {", ".join(missing)}')
+
+    numero_moto = str(body.get('numeroMoto', '')).strip()
+    if not re.fullmatch(r'\d{3}', numero_moto):
+        return error('numeroMoto debe ser un string de 3 dígitos (ej. 002)')
 
     tabla = dynamodb.Table(CONDUCTORES_TABLE)
 
@@ -83,15 +88,15 @@ def registerConductor(event, context):
 
     item = {
         'driverId': driver_id,
-        'nombre': body['nombre'],
-        'apellido': body['apellido'],
-        'telefono': body['telefono'],
+        'nombre': body['nombre'].strip(),
+        'apellido': body['apellido'].strip(),
+        'telefono': str(body['telefono']).strip(),
         'placa': body['placa'].upper(),
         'contrasenaHasheada': hash_password(body['contrasena']),
         'fotoUrl': '',
-        'marca': body.get('marca', ''),
-        'color': body.get('color', ''),
-        'numeroMoto': body.get('numeroMoto', ''),
+        'marca': str(body.get('marca', '')).strip(),
+        'color': str(body.get('color', '')).strip(),
+        'numeroMoto': numero_moto,
         'sumaCalificaciones': Decimal('0'),
         'totalCalificaciones': Decimal('0'),
         'activo': False,         # Inicia como NO disponible
@@ -104,14 +109,15 @@ def registerConductor(event, context):
 
     token = generate_jwt({
         'sub': driver_id,
-        'telefono': body['telefono'],
+        'telefono': str(body['telefono']).strip(),
         'rol': 'CONDUCTOR',
-        'nombre': body['nombre'],
+        'nombre': body['nombre'].strip(),
     })
 
     return success({
         'message': 'Conductor registrado exitosamente. Esperando autorización del admin.',
         'driverId': driver_id,
+        'numeroMoto': numero_moto,
         'token': token,
     }, 201)
 
@@ -165,6 +171,7 @@ def loginConductor(event, context):
         'driverId': conductor['driverId'],
         'nombre': conductor.get('nombre'),
         'apellido': conductor.get('apellido'),
+        'numeroMoto': conductor.get('numeroMoto', ''),
         'activo': conductor.get('activo', False),
         'libre': conductor.get('libre', False),
         'autorizadoPorAdmin': conductor.get('autorizadoPorAdmin', False),
@@ -210,7 +217,7 @@ def updatePerfilConductor(event, context):
     if not body:
         return error('Falta el body')
 
-    allowed = ['nombre', 'apellido', 'telefono', 'placa', 'marca', 'color']
+    allowed = ['nombre', 'apellido', 'telefono', 'placa', 'marca', 'color', 'numeroMoto']
     expr_parts, values, names = [], {}, {}
 
     for campo in allowed:
@@ -221,6 +228,10 @@ def updatePerfilConductor(event, context):
             val = body[campo]
             if campo == 'placa':
                 val = val.upper()
+            elif campo == 'numeroMoto':
+                val = str(val).strip()
+                if not re.fullmatch(r'\d{3}', val):
+                    return error('numeroMoto debe tener exactamente 3 dígitos')
             values[placeholder] = val
             names[safe] = campo
 
