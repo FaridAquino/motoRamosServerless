@@ -21,6 +21,8 @@ from auth_utils import (
     success, error, require_auth, extract_body,
 )
 
+from sms_service import enviar_codigo_sms, verificar_codigo
+
 # ─── Tablas y recursos ──────────────────────────────────────────────────────
 USUARIOS_TABLE = os.environ['usuariosTable']
 SERVICIOS_TABLE = os.environ['serviciosTable']
@@ -354,4 +356,51 @@ def getInformacionServicio(event, context):
         'origen': serv.get('origen', {}),
         'destino': serv.get('destino', {}),
         'precioFinal': serv.get('precioFinal', 0),
+        'estado': serv.get('estado', ''),
     })
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /enviarCodigo  (público) — Envía SMS con código OTP
+# ═══════════════════════════════════════════════════════════════════════════════
+def enviarCodigoSms(event, context):
+    """Genera y envía un código OTP de 6 dígitos por SMS al número indicado."""
+    body = extract_body(event)
+    if not body:
+        return error('Falta el body de la solicitud')
+
+    telefono = body.get('telefono', '').strip()
+
+    if not telefono:
+        return error('El teléfono es requerido')
+    if len(telefono) != 9 or not telefono.isdigit():
+        return error('El teléfono debe tener exactamente 9 dígitos numéricos')
+
+    resultado = enviar_codigo_sms(telefono)
+    if resultado['success']:
+        return success({'message': 'Código enviado por SMS'})
+    else:
+        return error(f'Error al enviar SMS: {resultado.get("error", "desconocido")}', 500)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /verificarCodigo  (público) — Verifica el código OTP ingresado
+# ═══════════════════════════════════════════════════════════════════════════════
+def verificarCodigoSms(event, context):
+    """Verifica que el código OTP sea válido y no haya expirado."""
+    body = extract_body(event)
+    if not body:
+        return error('Falta el body de la solicitud')
+
+    telefono = body.get('telefono', '').strip()
+    codigo = body.get('codigo', '').strip()
+
+    if not telefono or not codigo:
+        return error('Teléfono y código son requeridos')
+    if len(codigo) != 6 or not codigo.isdigit():
+        return error('El código debe tener 6 dígitos')
+
+    resultado = verificar_codigo(telefono, codigo)
+    if resultado['success']:
+        return success({'message': 'Teléfono verificado correctamente', 'verificado': True})
+    else:
+        return error(resultado['message'], 400)

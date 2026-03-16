@@ -25,12 +25,17 @@ provider:
             - "arn:aws:dynamodb:us-east-1:*:table/servicios/index/*"
             - "arn:aws:dynamodb:us-east-1:*:table/conductores"
             - "arn:aws:dynamodb:us-east-1:*:table/conductores/index/*"
+            - "arn:aws:dynamodb:us-east-1:*:table/otp_verificacion"
         - Effect: Allow
           Action:
             - s3:PutObject
             - s3:GetObject
           Resource:
             - "arn:aws:s3:::motoramos-fotos-${self:provider.stage}/*"
+        - Effect: Allow
+          Action:
+            - sns:Publish
+          Resource: "*"  
 
   environment:
     usuariosTable: usuarios
@@ -38,6 +43,7 @@ provider:
     serviciosTable: servicios
     fotosBucket: motoramos-fotos-${self:provider.stage}
     JWT_SECRET: ${env:JWT_SECRET, 'motoRamos-tarma-jwt-secret-utec-2026'}
+    otpTable: otp_verificacion
 
 package:
   patterns:
@@ -114,3 +120,36 @@ functions:
           path: /servicio
           method: get
           cors: true
+
+  EnviarCodigoSms:
+    handler: handler.enviarCodigoSms
+    events:
+      - http:
+          path: /enviarCodigo
+          method: post
+          cors: true
+
+  VerificarCodigoSms:
+    handler: handler.verificarCodigoSms
+    events:
+      - http:
+          path: /verificarCodigo
+          method: post
+          cors: true
+
+resources:
+  Resources:
+    OtpTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: otp_verificacion
+        AttributeDefinitions:
+          - AttributeName: telefono
+            AttributeType: S
+        KeySchema:
+          - AttributeName: telefono
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        TimeToLiveSpecification:
+          AttributeName: expira_en
+          Enabled: true
