@@ -138,7 +138,7 @@ def _enviar_notificaciones_fcm(tokens_to_send, titulo, body_data):
     elif body_data.get('action') == 'viajeIniciado':
         texto_visible = "Tu viaje ha comenzado. ¡Buen viaje!"
     
-    elif body_data.get('action') == 'Tu viaje ha sido completado':
+    elif body_data.get('action') == 'viajeCompletado':
         texto_visible = "Tu viaje ha sido completado. ¡Gracias por usar MotoRamos!"
     
     body_string = json.dumps(body_data)

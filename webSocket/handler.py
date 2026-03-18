@@ -507,28 +507,6 @@ def servicio_requerido(event, context):
         ProjectionExpression='driverId',
     )
 
-    listaConductores = [item['driverId'] for item in response.get('Items', [])]
-
-    print(f"Enviando notificacion a {len(listaConductores)} conductores")
-
-    _enviar_notificacion_push(
-        listaUsuarios=[claims['sub']], #solo para probar
-        listaConductores=listaConductores,
-        title='Nuevo servicio solicitado',
-        body={
-            'action': 'nuevoServicio',
-            'serviceId': service_id,
-            'origen': origen_crudo,
-            'destino': destino_crudo,
-            'precioSugerido': float(item['precioSugerido']),
-            'nombreUsuario': claims.get('nombre', ''),
-            'usuarioId': claims.get('sub', ''),
-            'comentario': body.get('comentario', ''),
-            'cantidad': body.get('cantidad', 1),
-            'creadoEn': ahora,
-        }
-    )
-
     return _ws_ok()
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -909,91 +887,6 @@ def conductor_esperando(event, context):
     )
 
     return _ws_ok()
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# cancelarViajeConductor — Conductor cancela el viaje antes de iniciar (pasajero no subió)
-# ═══════════════════════════════════════════════════════════════════════════════
-def cancelar_viaje_conductor(event, context):
-    """El conductor cancela el viaje antes de iniciar (pasajero no subió). Estado → CANCELADO.
-
-    Body esperado:
-    {
-      "action": "cancelarViajeConductor",
-      "serviceId": "uuid-del-servicio",
-      "motivo": "Pasajero no apareció"
-    }
-    """
-
-    claims = _get_claims(event)
-    if not claims:
-        return _ws_error('No autenticado', 401)
-    if claims['rol'] != 'CONDUCTOR':
-        return _ws_error('Solo conductores pueden cancelar viajes', 403)
-
-    body = _parse_body(event)
-    service_id = body.get('serviceId')
-    motivo = body.get('motivo', 'Sin motivo especificado')
-    if not service_id:
-        return _ws_error('serviceId es requerido')
-
-    ahora = datetime.now(ZONA_PERU).isoformat()
-    tabla = dynamodb.Table(SERVICIOS_TABLE)
-
-    try:
-        tabla.update_item(
-            Key={'serviceId': service_id},
-            UpdateExpression='SET estado = :e, canceladoEn = :t, motivoCancelacion = :m, actualizadoEn = :t, canceladoPor = :c',
-            ConditionExpression='estado IN (:encamino) AND driverId = :d',
-            ExpressionAttributeValues={
-                ':e': 'CANCELADO',
-                ':encamino': 'EN_CAMINO',
-                ':d': claims['sub'],
-                ':m': motivo,
-                ':t': ahora,
-                ':c': 'CONDUCTOR',
-            },
-        )
-    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
-        return _ws_error('No se puede cancelar el viaje. Verifica el estado del servicio.')
-
-    # Obtener servicio para notificar al pasajero
-    serv = tabla.get_item(Key={'serviceId': service_id}).get('Item', {})
-    apigw = _get_apigw_client(event)
-
-    _notify_user(apigw, serv.get('usuarioId', ''), {
-        'action': 'viajeCanceladoConductor',
-        'serviceId': service_id,
-        'estado': 'CANCELADO',
-        'motivo': motivo,
-        'message': f'El conductor ha cancelado el viaje. Motivo: {motivo}',
-    })
-
-    conn_id = event['requestContext']['connectionId']
-    _send_to_connection(apigw, conn_id, {
-        'action': 'viajeCanceladoConductorConfirmacion',
-        'serviceId': service_id,
-        'estado': 'CANCELADO',
-        'motivo': motivo,
-        'message': f'Viaje cancelado. Motivo: {motivo}',
-    })
-
-    # Enviamos una notficacion al pasajero sobre que el conductor ha cancelado el viaje
-    _enviar_notificacion_push(
-        listaUsuarios=[serv.get('usuarioId', '')],
-        listaConductores=[],
-        title='Viaje cancelado por el conductor',
-        body={
-            'action': 'viajeCanceladoConductor',
-            'serviceId': service_id,
-            'estado': 'CANCELADO',
-            'motivo': motivo,
-            'message': f'El conductor ha cancelado el viaje. Motivo: {motivo}',
-        }
-    )
-
-    return _ws_ok()
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # obtenerUbicacionRecojo - Usuario obtiene la ubicación del conductor para el recojo

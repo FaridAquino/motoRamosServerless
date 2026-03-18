@@ -135,12 +135,6 @@ functions:
       - websocket:
           route: conductorEsperando
 
-  CancelarViajeConductor:
-    handler: handler.cancelar_viaje_conductor
-    events:
-      - websocket:
-          route: cancelarViajeConductor
-
   # ── Comunicación ──
   Informar:
     handler: handler.informar
