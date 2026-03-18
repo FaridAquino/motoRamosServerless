@@ -319,6 +319,7 @@ def calificarConductor(event, context):
 
     return success({'message': 'Calificación registrada exitosamente'})
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # GET /informacion_servicio (auth) — Obtener información de un servicio específico
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -358,6 +359,50 @@ def getInformacionServicio(event, context):
         'precioFinal': serv.get('precioFinal', 0),
         'estado': serv.get('estado', ''),
     })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GET /ultimoServicio (auth) — Obtener información del último servicio registrado por el usuario
+# ═══════════════════════════════════════════════════════════════════════════════
+@require_auth
+def getUltimoServicio(event, context):
+    """Devuelve el último servicio registrado por el usuario.
+    """
+    claims = event['authClaims']
+    usuario_id = claims['sub']
+
+    tabla_serv = dynamodb.Table(SERVICIOS_TABLE)
+    
+    result = tabla_serv.query(
+        IndexName='UsuarioFechaIndex',
+        KeyConditionExpression=Key('usuarioId').eq(usuario_id),
+        ScanIndexForward=False,
+        Limit=1,
+    )
+
+    items = result.get('Items', [])
+    if not items:
+        return error('No se encontraron servicios', 404)
+
+    serv = items[0]
+
+    return success({
+        'serviceId': serv.get('serviceId'),
+        'driverId': serv.get('driverId'),
+        'nombreConductor': serv.get('nombreConductor'),
+        'placaMoto': serv.get('placaMoto', ''),
+        'telefonoConductor': serv.get('telefonoConductor', ''),
+        'numeroMoto': serv.get('numeroMoto', ''),
+        'colorMoto': serv.get('colorMoto', ''),
+        'ratingConductor': float(serv.get('ratingConductor', 0)),
+        'marcaMoto': serv.get('marcaMoto', ''),
+        'ubicacionConductor': serv.get('ubicacionConductor', {}),
+        'origen': serv.get('origen', {}),
+        'destino': serv.get('destino', {}),
+        'precioFinal': float(serv.get('precioFinal', 0)),
+        'estado': serv.get('estado', ''),
+    })
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # POST /enviarCodigo  (público) — Envía SMS con código OTP
