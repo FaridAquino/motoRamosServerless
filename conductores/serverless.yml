@@ -25,6 +25,7 @@ provider:
             - "arn:aws:dynamodb:us-east-1:*:table/servicios/index/*"
             - "arn:aws:dynamodb:us-east-1:*:table/usuarios"
             - "arn:aws:dynamodb:us-east-1:*:table/usuarios/index/*"
+            - "arn:aws:dynamodb:us-east-1:*:table/UsersDevicesMotoRamos"
         - Effect: Allow
           Action:
             - s3:PutObject
@@ -38,6 +39,7 @@ provider:
     usuariosTable: usuarios
     fotosBucket: motoramos-fotos-${self:provider.stage}
     JWT_SECRET: ${env:JWT_SECRET, 'motoRamos-tarma-jwt-secret-utec-2026'}
+    Users_Devices: UsersDevicesMotoRamos
 
 package:
   patterns:
@@ -137,4 +139,12 @@ functions:
       - http:
           path: /ganancias
           method: get
+          cors: true
+
+  RegistrarDeviceToken:
+    handler: handler.registrarDeviceToken
+    events:
+      - http:
+          path: /registrar-device-token
+          method: post
           cors: true

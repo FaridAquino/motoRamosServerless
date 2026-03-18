@@ -392,15 +392,36 @@ def servicio_requerido(event, context):
 
     body = _parse_body(event)
 
-    origen_crudo = body.get('origen')
-    destino_crudo = body.get('destino')
+    origen_crudo = body.get('origen') or {}
+    destino_crudo = body.get('destino') or {}
+    destino_referencia = (
+        body.get('destinoReferencia')
+        or body.get('referenciaDestino')
+        or destino_crudo.get('direccion')
+        or ''
+    )
 
+    if not origen_crudo:
+        return _ws_error('Se requiere origen')
 
-    if not origen_crudo or not destino_crudo:
-        return _ws_error('Se requiere origen y destino')
+    if origen_crudo.get('lat') is None or origen_crudo.get('lng') is None:
+        return _ws_error('El origen debe incluir lat y lng')
+
+    if not destino_crudo and not destino_referencia:
+        return _ws_error('Se requiere destino o una referencia de destino')
 
     origen = _coordenadas_a_decimal(origen_crudo)
-    destino = _coordenadas_a_decimal(destino_crudo)
+
+    destino_tiene_coordenadas = (
+        destino_crudo.get('lat') is not None and destino_crudo.get('lng') is not None
+    )
+    if destino_tiene_coordenadas:
+        destino = _coordenadas_a_decimal(destino_crudo)
+    else:
+        destino = {
+            'direccion': destino_referencia,
+            'coordenadasExactas': False,
+        }
 
     ahora = datetime.now(ZONA_PERU).isoformat()
     service_id = str(uuid.uuid4())
@@ -570,6 +591,10 @@ def enviar_oferta_conductor(event, context):
         return _ws_error('Servicio no encontrado o ya no está disponible', 404)
     if result['Item']['estado'] != 'PENDIENTE':
         return _ws_error('Servicio no está disponible para aceptar', 400)
+
+    precio_base = Decimal(str(result['Item'].get('precioSugerido', 0)))
+    if precio_ofrecido < precio_base:
+        return _ws_error('El precio ofrecido no puede ser menor al precio sugerido por el pasajero')
 
     conductor_info = tablaConductores.get_item(
         Key={'driverId': conductor_id},
@@ -1197,8 +1222,8 @@ def cancelar_servicio(event, context):
     if not es_usuario and not es_conductor:
         return _ws_error('No autorizado para cancelar este servicio', 403)
 
-    # Solo cancelar si PENDIENTE o EN_CAMINO
-    if estado not in ('PENDIENTE', 'EN_CAMINO'):
+    estados_permitidos = ('PENDIENTE', 'EN_CAMINO', 'EN_CURSO') if es_usuario else ('PENDIENTE', 'EN_CAMINO')
+    if estado not in estados_permitidos:
         return _ws_error(f'No se puede cancelar un servicio en estado {estado}')
 
     ahora = datetime.now(ZONA_PERU).isoformat()
@@ -1206,21 +1231,28 @@ def cancelar_servicio(event, context):
     motivo = body.get('motivo', 'Sin motivo especificado')
 
     try:
+        expr_values = {
+            ':e': 'CANCELADO',
+            ':t': ahora,
+            ':cp': cancelado_por,
+            ':m': motivo,
+            ':p': 'PENDIENTE',
+            ':enc': 'EN_CAMINO',
+        }
+        if es_usuario:
+            expr_values[':ecu'] = 'EN_CURSO'
+            condition = 'estado IN (:p, :enc, :ecu)'
+        else:
+            condition = 'estado IN (:p, :enc)'
+
         tabla.update_item(
             Key={'serviceId': service_id},
             UpdateExpression=(
                 'SET estado = :e, canceladoEn = :t, canceladoPor = :cp, '
                 'motivoCancelacion = :m, actualizadoEn = :t'
             ),
-            ConditionExpression='estado IN (:p, :enc)',
-            ExpressionAttributeValues={
-                ':e': 'CANCELADO',
-                ':t': ahora,
-                ':cp': cancelado_por,
-                ':m': motivo,
-                ':p': 'PENDIENTE',
-                ':enc': 'EN_CAMINO',
-            },
+            ConditionExpression=condition,
+            ExpressionAttributeValues=expr_values,
         )
     except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
         return _ws_error('El servicio ya cambió de estado. No se pudo cancelar.')

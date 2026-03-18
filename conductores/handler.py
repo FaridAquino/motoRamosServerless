@@ -16,6 +16,7 @@ from decimal import Decimal
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from boto3.dynamodb.conditions import Key, Attr
+from botocore.exceptions import ClientError
 
 from auth_utils import (
     generate_jwt, hash_password, verify_password,
@@ -27,6 +28,7 @@ CONDUCTORES_TABLE = os.environ['conductoresTable']
 SERVICIOS_TABLE = os.environ['serviciosTable']
 USUARIOS_TABLE = os.environ['usuariosTable']
 FOTOS_BUCKET = os.environ.get('fotosBucket', '')
+USERS_DEVICES_TABLE = os.environ.get('Users_Devices', 'UsersDevicesMotoRamos')
 
 dynamodb = boto3.resource('dynamodb')
 ZONA_PERU = ZoneInfo('America/Lima')
@@ -506,3 +508,44 @@ def getGananciasConductor(event, context):
         'totalGanancia': round(total, 2),
         'servicios': servicios,
     })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /registrar-device-token  (auth) — Registrar token FCM del conductor
+# ═══════════════════════════════════════════════════════════════════════════════
+@require_auth
+def registrarDeviceToken(event, context):
+    """Registra el token de dispositivo para notificaciones push.
+    Si el conductor ya está registrado, no sobreescribe ni duplica registros."""
+    claims = event['authClaims']
+    body = extract_body(event)
+    if not body:
+        return error('Falta el body')
+
+    device_token = str(body.get('device_token', '')).strip()
+    if not device_token:
+        return error('device_token es requerido')
+
+    tabla = dynamodb.Table(USERS_DEVICES_TABLE)
+    item = {
+        'userId': claims['sub'],
+        'device_token': device_token,
+    }
+
+    try:
+        tabla.put_item(
+            Item=item,
+            ConditionExpression='attribute_not_exists(userId)',
+        )
+        return success({
+            'message': 'Token de dispositivo registrado exitosamente',
+            'registered': True,
+        })
+    except ClientError as e:
+        if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+            return success({
+                'message': 'El dispositivo ya estaba registrado. No se realizaron cambios.',
+                'registered': False,
+                'status': 'skipped',
+            })
+        raise
