@@ -474,7 +474,6 @@ def servicio_requerido(event, context):
         'precioFinal': Decimal('0'),
         'comentario': body.get('comentario', ''),
         'cantidad': body.get('cantidad', 1),
-        'ofertaAceptada': False,
         'creadoEn': ahora,
         'actualizadoEn': ahora,
     }
@@ -580,7 +579,7 @@ def enviar_oferta_conductor(event, context):
     if not result.get('Item'):
         return _ws_error('Servicio no encontrado o ya no está disponible', 404)
     serv = result['Item']
-    if serv.get('estado') != 'PENDIENTE' or serv.get('ofertaAceptada', False):
+    if serv.get('estado') != 'PENDIENTE':
         apigw = _get_apigw_client(event)
         conn_id = event['requestContext']['connectionId']
         _send_to_connection(apigw, conn_id, {
@@ -729,10 +728,9 @@ def aceptar_oferta(event, context):
                 'SET driverId = :d, estado = :e, nombreConductor = :nc, '
                 'telefonoConductor = :tc, placaMoto = :pm, '
                 'precioFinal = :pf, aceptadoEn = :t, actualizadoEn = :t, '
-                'numeroMoto = :nm, colorMoto = :cm, ratingConductor = :rc, marcaMoto = :mk, '
-                'ofertaAceptada = :oa'
+                'numeroMoto = :nm, colorMoto = :cm, ratingConductor = :rc, marcaMoto = :mk'
             ),
-            ConditionExpression='estado = :pendiente AND driverId = :none AND (attribute_not_exists(ofertaAceptada) OR ofertaAceptada = :oaf)',
+            ConditionExpression='estado = :pendiente AND driverId = :none',
             ExpressionAttributeValues={
                 ':d': body.get('conductorId', ''),
                 ':e': 'EN_CAMINO',
@@ -747,8 +745,6 @@ def aceptar_oferta(event, context):
                 ':cm': driver_data.get('color', ''),
                 ':rc': Decimal(str(driver_data.get('calificacionPromedio', 0))),
                 ':mk': driver_data.get('marca', ''),
-                ':oa': True,
-                ':oaf': False,
             },
         )
     except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
@@ -1197,6 +1193,11 @@ def cancelar_servicio(event, context):
         _notify_driver(apigw, serv['driverId'], cancel_payload)
     elif es_conductor:
         _notify_user(apigw, serv.get('usuarioId', ''), cancel_payload)
+
+    # Si el pasajero cancela una solicitud aún pendiente sin conductor asignado,
+    # se notifica a todos los conductores activos para retirarla en tiempo real.
+    if es_usuario and serv.get('driverId', 'NONE') == 'NONE':
+        _broadcast_to_active_drivers(apigw, cancel_payload)
 
     # Confirmar al que canceló
     conn_id = event['requestContext']['connectionId']

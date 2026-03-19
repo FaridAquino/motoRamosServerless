@@ -103,6 +103,7 @@ def registerConductor(event, context):
         'totalCalificaciones': Decimal('0'),
         'activo': False,         # Inicia como NO disponible
         'libre': False,          # Estado operativo visible en el frontend del conductor
+        'ofertaAceptada': False,
         'autorizadoPorAdmin': True,
         'creadoEn': ahora,
     }
@@ -153,13 +154,15 @@ def loginConductor(event, context):
         return error('Contraseña incorrecta', 401)
 
     # Al iniciar sesión se marca activo=true y libre=false automáticamente.
+    # ofertaAceptada se inicializa/normaliza en false por requerimiento de negocio.
     tabla.update_item(
         Key={'driverId': conductor['driverId']},
-        UpdateExpression='SET activo = :a, libre = :l',
-        ExpressionAttributeValues={':a': True, ':l': False},
+        UpdateExpression='SET activo = :a, libre = :l, ofertaAceptada = :oa',
+        ExpressionAttributeValues={':a': True, ':l': False, ':oa': False},
     )
     conductor['activo'] = True
     conductor['libre'] = False
+    conductor['ofertaAceptada'] = False
 
     token = generate_jwt({
         'sub': conductor['driverId'],
@@ -399,9 +402,7 @@ def getSolicitudesViaje(event, context):
 
     tabla = dynamodb.Table(SERVICIOS_TABLE)
     resp = tabla.scan(
-        FilterExpression=Attr('estado').eq('PENDIENTE') & (
-            Attr('ofertaAceptada').not_exists() | Attr('ofertaAceptada').eq(False)
-        ),
+        FilterExpression=Attr('estado').eq('PENDIENTE'),
     )
 
     solicitudes = resp.get('Items', [])
