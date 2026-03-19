@@ -399,7 +399,9 @@ def getSolicitudesViaje(event, context):
 
     tabla = dynamodb.Table(SERVICIOS_TABLE)
     resp = tabla.scan(
-        FilterExpression=Attr('estado').eq('PENDIENTE'),
+        FilterExpression=Attr('estado').eq('PENDIENTE') & (
+            Attr('ofertaAceptada').not_exists() | Attr('ofertaAceptada').eq(False)
+        ),
     )
 
     solicitudes = resp.get('Items', [])

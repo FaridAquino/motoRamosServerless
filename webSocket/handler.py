@@ -311,6 +311,17 @@ def connect(event, context):
         'ttl': int(time.time()) + 86400,  # Auto-expirar en 24h
     })
 
+    # Si es conductor, al reconectar se marca como activo automáticamente.
+    if claims.get('rol') == 'CONDUCTOR':
+        try:
+            dynamodb.Table(CONDUCTORES_TABLE).update_item(
+                Key={'driverId': claims['sub']},
+                UpdateExpression='SET activo = :a',
+                ExpressionAttributeValues={':a': True},
+            )
+        except Exception:
+            pass
+
     return {'statusCode': 200, 'body': 'Conectado'}
 
 
@@ -463,6 +474,7 @@ def servicio_requerido(event, context):
         'precioFinal': Decimal('0'),
         'comentario': body.get('comentario', ''),
         'cantidad': body.get('cantidad', 1),
+        'ofertaAceptada': False,
         'creadoEn': ahora,
         'actualizadoEn': ahora,
     }
@@ -589,10 +601,18 @@ def enviar_oferta_conductor(event, context):
 
     if not result.get('Item'):
         return _ws_error('Servicio no encontrado o ya no está disponible', 404)
-    if result['Item']['estado'] != 'PENDIENTE':
-        return _ws_error('Servicio no está disponible para aceptar', 400)
+    serv = result['Item']
+    if serv.get('estado') != 'PENDIENTE' or serv.get('ofertaAceptada', False):
+        apigw = _get_apigw_client(event)
+        conn_id = event['requestContext']['connectionId']
+        _send_to_connection(apigw, conn_id, {
+            'action': 'servicioNoDisponible',
+            'serviceId': service_id,
+            'message': 'Esta solicitud de viaje ya no está disponible.',
+        })
+        return _ws_ok()
 
-    precio_base = Decimal(str(result['Item'].get('precioSugerido', 0)))
+    precio_base = Decimal(str(serv.get('precioSugerido', 0)))
     if precio_ofrecido < precio_base:
         return _ws_error('El precio ofrecido no puede ser menor al precio sugerido por el pasajero')
 
@@ -731,9 +751,10 @@ def aceptar_oferta(event, context):
                 'SET driverId = :d, estado = :e, nombreConductor = :nc, '
                 'telefonoConductor = :tc, placaMoto = :pm, '
                 'precioFinal = :pf, aceptadoEn = :t, actualizadoEn = :t, '
-                'numeroMoto = :nm, colorMoto = :cm, ratingConductor = :rc, marcaMoto = :mk'
+                'numeroMoto = :nm, colorMoto = :cm, ratingConductor = :rc, marcaMoto = :mk, '
+                'ofertaAceptada = :oa'
             ),
-            ConditionExpression='estado = :pendiente AND driverId = :none',
+            ConditionExpression='estado = :pendiente AND driverId = :none AND (attribute_not_exists(ofertaAceptada) OR ofertaAceptada = :oaf)',
             ExpressionAttributeValues={
                 ':d': body.get('conductorId', ''),
                 ':e': 'EN_CAMINO',
@@ -748,6 +769,8 @@ def aceptar_oferta(event, context):
                 ':cm': driver_data.get('color', ''),
                 ':rc': Decimal(str(driver_data.get('calificacionPromedio', 0))),
                 ':mk': driver_data.get('marca', ''),
+                ':oa': True,
+                ':oaf': False,
             },
         )
     except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
@@ -778,6 +801,13 @@ def aceptar_oferta(event, context):
         'nombreUsuario': serv.get('nombreUsuario', ''),
         'precioFinal': float(serv.get('precioFinal', 0)),
         'message': 'Servicio aceptado. Ve al punto de recojo.'
+    })
+
+    # Retirar esta solicitud de las listas de todos los conductores conectados.
+    _broadcast_to_active_drivers(apigw, {
+        'action': 'servicioTomado',
+        'serviceId': service_id,
+        'message': 'Esta solicitud ya no está disponible.',
     })
     
     # Confirmar al usuario
@@ -944,10 +974,11 @@ def cancelar_viaje_conductor(event, context):
         tabla.update_item(
             Key={'serviceId': service_id},
             UpdateExpression='SET estado = :e, canceladoEn = :t, motivoCancelacion = :m, actualizadoEn = :t, canceladoPor = :c',
-            ConditionExpression='estado IN (:encamino) AND driverId = :d',
+            ConditionExpression='estado IN (:encamino, :esperando) AND driverId = :d',
             ExpressionAttributeValues={
                 ':e': 'CANCELADO',
                 ':encamino': 'EN_CAMINO',
+                ':esperando': 'ESPERANDO',
                 ':d': claims['sub'],
                 ':m': motivo,
                 ':t': ahora,
