@@ -18,7 +18,7 @@ from boto3.dynamodb.conditions import Key
 
 from auth_utils import (
     generate_jwt, hash_password, verify_password,
-    success, error, require_auth, extract_body,
+    success, error, require_auth, extract_body, verify_jwt
 )
 
 from sms_service import enviar_codigo_sms, verificar_codigo
@@ -449,3 +449,23 @@ def verificarCodigoSms(event, context):
         return success({'message': 'Teléfono verificado correctamente', 'verificado': True})
     else:
         return error(resultado['message'], 400)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# POST /verificarToken  (público) — Verifica el token
+# ═══════════════════════════════════════════════════════════════════════════════
+def verificarToken(event, context):
+    """Verifica el token JWT enviado en el body."""
+    body = extract_body(event)
+    if not body:
+        return error('Body requerido', 400)
+
+    token = body.get('token')
+    if not token:
+        return error('token es requerido', 400)
+
+    claims = verify_jwt(token)
+    if claims:
+        return success({'valid': True, 'claims': claims})
+    else:
+        return error('Token inválido o expirado', 401)

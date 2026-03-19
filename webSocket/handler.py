@@ -521,6 +521,55 @@ def servicio_requerido(event, context):
 
     return _ws_ok()
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# reenviarServicio — Pasajero reenvia su solicitud por si perdio la conexion o no se notifico a los conductores
+# ═══════════════════════════════════════════════════════════════════════════════
+def reenviarServicio(event, context):
+    """
+    El pasajero reenvia su solicitud de servicio. Esto es útil si el pasajero perdió la conexión o si por alguna razón los conductores no recibieron la notificación inicial.
+    body esperado
+    {
+      "action": "reenviarServicio",
+      "serviceId": "uuid-del-servicio"
+    }
+    """
+
+    claims = _get_claims(event)
+    if not claims:
+        return _ws_error('No autenticado', 401)
+    if claims['rol'] != 'USUARIO':
+        return _ws_error('Solo usuarios pueden solicitar servicios', 403)
+
+    body= _parse_body(event)
+    tabla = dynamodb.Table(SERVICIOS_TABLE)
+
+    response = tabla.get_item(Key={'serviceId': body.get('serviceId', '')})
+
+    apigw = _get_apigw_client(event)
+    _broadcast_to_active_drivers(apigw, {
+        'action': 'nuevoServicio',
+        'serviceId': response['Item']['serviceId'],
+        'origen': response['Item']['origen'],
+        'destino': response['Item']['destino'],
+        'precioSugerido': float(response['Item']['precioSugerido']),
+        'nombreUsuario': claims.get('nombre', ''),
+        'usuarioId': claims.get('sub', ''),
+        'comentario': response['Item'].get('comentarioUsuario', ''),
+        'cantidad': response['Item'].get('cantidad', 1),
+        'creadoEn': response['Item']['creadoEn'],
+    })
+
+    conn_id = event['requestContext']['connectionId']
+    _send_to_connection(apigw, conn_id, {
+        'action': 'servicioReenviado',
+        'serviceId': response['Item']['serviceId'],
+        'estado': 'PENDIENTE',
+        'message': 'Buscando conductor disponible en Tarma...',
+    })
+
+    return _ws_ok()
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # enviarOfertaConductor — Conductor envía una oferta para aceptar el servicio
 # ═══════════════════════════════════════════════════════════════════════════════
