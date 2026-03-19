@@ -130,7 +130,13 @@ def _enviar_notificaciones_fcm(tokens_to_send, titulo, body_data):
         texto_visible = "Tu viaje ha sido cancelado por el conductor."
 
     elif body_data.get('action') == 'servicioCancelado':
-        texto_visible = "El servicio ah sido cancelado por el usuario."
+        cancelado_por = body_data.get('canceladoPor', '')
+        if cancelado_por == 'CONDUCTOR':
+            texto_visible = "El servicio ha sido cancelado por el conductor."
+        elif cancelado_por == 'USUARIO':
+            texto_visible = "El servicio ha sido cancelado por el usuario."
+        else:
+            texto_visible = "El servicio ha sido cancelado."
     
     elif body_data.get('action') == 'conductorEsperando':
         texto_visible = "El conductor ha llegado al punto de origen y está esperando."
@@ -138,7 +144,7 @@ def _enviar_notificaciones_fcm(tokens_to_send, titulo, body_data):
     elif body_data.get('action') == 'viajeIniciado':
         texto_visible = "Tu viaje ha comenzado. ¡Buen viaje!"
     
-    elif body_data.get('action') == 'Tu viaje ha sido completado':
+    elif body_data.get('action') == 'viajeCompletado':
         texto_visible = "Tu viaje ha sido completado. ¡Gracias por usar MotoRamos!"
     
     body_string = json.dumps(body_data)

@@ -137,6 +137,14 @@ functions:
           method: post
           cors: true
 
+  GetUltimoServicio:
+    handler: handler.getUltimoServicio
+    events:
+      - http:
+          path: /ultimoServicio
+          method: get
+          cors: true
+
 resources:
   Resources:
     OtpTable:
