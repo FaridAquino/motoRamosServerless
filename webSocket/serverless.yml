@@ -103,6 +103,12 @@ functions:
     events:
       - websocket:
           route: obtenerUbicacionRecojo
+  
+  ReenviarServicio:
+    handler: handler.reenviar_servicio
+    events:
+      - websocket:
+          route: reenviarServicio
 
   # ── Acciones del Conductor ──
   EnviarOfertaConductor:

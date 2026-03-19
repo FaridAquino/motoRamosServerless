@@ -524,9 +524,9 @@ def servicio_requerido(event, context):
 # ═══════════════════════════════════════════════════════════════════════════════
 # reenviarServicio — Pasajero reenvia su solicitud por si perdio la conexion o no se notifico a los conductores
 # ═══════════════════════════════════════════════════════════════════════════════
-def reenviarServicio(event, context):
+def reenviar_servicio(event, context):
     """
-    El pasajero reenvia su solicitud de servicio. Esto es útil si el pasajero perdió la conexión o si por alguna razón los conductores no recibieron la notificación inicial.
+    El pasajero reenvia su solicitud de servicio.
     body esperado
     {
       "action": "reenviarServicio",

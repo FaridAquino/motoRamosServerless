@@ -144,6 +144,14 @@ functions:
           path: /ultimoServicio
           method: get
           cors: true
+  
+  VerificarToken:
+    handler: handler.verificarToken
+    events:
+      - http:
+          path: /verificarToken
+          method: post
+          cors: true
 
 resources:
   Resources:
