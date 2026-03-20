@@ -760,6 +760,7 @@ def aceptar_oferta(event, context):
     )
 
     if driver_res.get('Item', {}).get('ofertaAceptada', False)== True:
+        print("El conductor ya tiene una oferta aceptada. No puede aceptar otra.")
         _send_to_connection(apigw, conn_id, {
             'action': 'conductorOcupado',
             'serviceId': service_id,
@@ -1278,6 +1279,14 @@ def cancelar_servicio(event, context):
     # se notifica a todos los conductores activos para retirarla en tiempo real.
     if es_usuario and serv.get('driverId', 'NONE') == 'NONE':
         _broadcast_to_active_drivers(apigw, cancel_payload)
+
+    tabla_cond = dynamodb.Table(CONDUCTORES_TABLE)
+
+    tabla_cond.update_item(
+        Key={'driverId': serv.get('driverId', '')},
+        UpdateExpression='SET ofertaAceptada = :oa',
+        ExpressionAttributeValues={':oa': False},
+    )
 
     # Confirmar al que canceló
     conn_id = event['requestContext']['connectionId']
