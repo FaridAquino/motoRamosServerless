@@ -541,28 +541,39 @@ def reenviar_servicio(event, context):
         return _ws_error('Solo usuarios pueden solicitar servicios', 403)
 
     body= _parse_body(event)
+    service_id = body.get('serviceId', '')
+    if not service_id:
+        return _ws_error('serviceId es requerido')
+
     tabla = dynamodb.Table(SERVICIOS_TABLE)
 
-    response = tabla.get_item(Key={'serviceId': body.get('serviceId', '')})
+    response = tabla.get_item(Key={'serviceId': service_id})
+    item = response.get('Item')
+    if not item:
+        return _ws_error('Servicio no encontrado', 404)
+    if item.get('usuarioId') != claims.get('sub'):
+        return _ws_error('No puedes reenviar un servicio que no te pertenece', 403)
+    if item.get('estado') != 'PENDIENTE':
+        return _ws_error('Solo se puede reenviar un servicio pendiente', 409)
 
     apigw = _get_apigw_client(event)
     _broadcast_to_active_drivers(apigw, {
         'action': 'servicioReenviado',
-        'serviceId': response['Item']['serviceId'],
-        'origen': response['Item']['origen'],
-        'destino': response['Item']['destino'],
-        'precioSugerido': float(response['Item']['precioSugerido']),
+        'serviceId': item['serviceId'],
+        'origen': item['origen'],
+        'destino': item['destino'],
+        'precioSugerido': float(item['precioSugerido']),
         'nombreUsuario': claims.get('nombre', ''),
         'usuarioId': claims.get('sub', ''),
-        'comentario': response['Item'].get('comentarioUsuario', ''),
-        'cantidad': response['Item'].get('cantidad', 1),
-        'creadoEn': response['Item']['creadoEn'],
+        'comentario': item.get('comentario', ''),
+        'cantidad': item.get('cantidad', 1),
+        'creadoEn': item['creadoEn'],
     })
 
     conn_id = event['requestContext']['connectionId']
     _send_to_connection(apigw, conn_id, {
         'action': 'servicioReenviado',
-        'serviceId': response['Item']['serviceId'],
+        'serviceId': item['serviceId'],
         'estado': 'PENDIENTE',
         'message': 'Buscando conductor disponible en Tarma...',
     })
