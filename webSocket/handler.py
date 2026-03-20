@@ -547,7 +547,7 @@ def reenviar_servicio(event, context):
 
     apigw = _get_apigw_client(event)
     _broadcast_to_active_drivers(apigw, {
-        'action': 'nuevoServicio',
+        'action': 'servicioReenviado',
         'serviceId': response['Item']['serviceId'],
         'origen': response['Item']['origen'],
         'destino': response['Item']['destino'],
@@ -813,6 +813,16 @@ def aceptar_oferta(event, context):
             'message': 'Este servicio ya fue tomado por otro conductor.',
         })
         return _ws_ok()
+
+    try:
+        tabla_cond.update_item(
+            Key={'driverId': body.get('conductorId', '')},
+            UpdateExpression='SET ofertaAceptada = :oa',
+            ExpressionAttributeValues={':oa': True},
+        )
+    except Exception as e:
+        print(f"Error al marcar ofertaAceptada en conductor: {e}")
+        return _ws_error('Error interno al aceptar la oferta', 500)
 
     # Obtener servicio actualizado para notificar
     serv_result = tabla.get_item(Key={'serviceId': service_id})
