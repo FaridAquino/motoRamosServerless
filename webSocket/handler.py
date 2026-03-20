@@ -772,6 +772,7 @@ def aceptar_oferta(event, context):
 
     if driver_res.get('Item', {}).get('ofertaAceptada', False)== True:
         print("El conductor ya tiene una oferta aceptada. No puede aceptar otra.")
+        apigw = _get_apigw_client(event)
         _send_to_connection(apigw, conn_id, {
             'action': 'conductorOcupado',
             'serviceId': service_id,
