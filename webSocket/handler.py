@@ -756,8 +756,16 @@ def aceptar_oferta(event, context):
     driver_res = tabla_cond.get_item(
         Key={'driverId': body.get('conductorId', '')},
         ProjectionExpression='driverId, nombre, apellido, telefono, placa, marca, color, numeroMoto, fotoUrl, '
-                             'sumaCalificaciones, totalCalificaciones',
+                             'sumaCalificaciones, totalCalificaciones, ofertaAceptada',
     )
+
+    if driver_res.get('Item', {}).get('ofertaAceptada', False)== True:
+        _send_to_connection(apigw, conn_id, {
+            'action': 'conductorOcupado',
+            'serviceId': service_id,
+            'message': 'El conductor está ocupado.',
+        })
+        return _ws_ok()
 
     driver_data = driver_res.get('Item', {})
 
@@ -1099,6 +1107,19 @@ def completar_viaje(event, context):
 
     ahora = datetime.now(ZONA_PERU).isoformat()
     tabla = dynamodb.Table(SERVICIOS_TABLE)
+    driver_table = dynamodb.Table(CONDUCTORES_TABLE)
+
+    try:
+        # Marcar la oferta del conductor como disponible para otros servicios
+        driver_table.update_item(
+            Key={'driverId': claims['sub']},
+            UpdateExpression='SET ofertaAceptada = :oa',
+            ExpressionAttributeValues={':oa': False},
+        )
+    
+    except Exception as e:
+        print("Error al actualizar la oferta del conductor: ", str(e))
+        return _ws_error('Error al actualizar la oferta del conductor', 500)
 
     try:
         tabla.update_item(
