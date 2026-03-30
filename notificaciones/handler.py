@@ -75,29 +75,15 @@ def registrarToken(event, context):
             'device_token': device_token
         }
         
-        try:
-            usersDevicesTable.put_item(
-                Item=usersDevicesJson,
-                ConditionExpression='attribute_not_exists(userId)'
-            )
+        
+        usersDevicesTable.put_item(
+            Item=usersDevicesJson,
+        )
             
-            return {
-                'statusCode': 200,
-                'body': json.dumps({'message': 'Token registrado exitosamente'})
-            }
-
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
-                print(f"El token para {userId} ya existía. No se hizo nada.")
-                return {
-                    'statusCode': 200, # Retornamos 200 OK porque la solicitud fue procesada correctamente
-                    'body': json.dumps({
-                        'message': 'El dispositivo ya estaba registrado. No se realizaron cambios.',
-                        'status': 'skipped'
-                    })
-                }
-            else:
-                raise e
+        return {
+            'statusCode': 200,
+            'body': json.dumps({'message': 'Token registrado exitosamente'})
+        }
 
     except Exception as e:
         print(f"Error crítico: {e}")
