@@ -4,6 +4,8 @@ provider:
   name: aws
   runtime: python3.12
   timeout: 29
+  memorySize: 512
+  logRetentionInDays: 7
   region: us-east-1
   stage: dev
 

@@ -187,44 +187,55 @@ def _coordenadas_a_decimal(ubicacion) -> dict:
 
 
 def _obtener_distancia_tiempo(lat_origen, lon_origen, lat_destino, lon_destino) -> dict:
-    # 1. Leer la variable que Serverless inyectó desde tu .env
-    api_key = os.environ.get('GOOGLE_MAPS_API_KEY')
-    
-    if not api_key:
-        print("Error: GOOGLE_MAPS_API_KEY no está configurada")
+    """Calcula distancia y tiempo en moto entre dos puntos usando Mapbox Directions API.
+    Free tier: 100k requests/mes. Devuelve None si la API falla."""
+    access_token = os.environ.get('MAPBOX_ACCESS_TOKEN')
+
+    if not access_token:
+        print("Error: MAPBOX_ACCESS_TOKEN no está configurada")
         return None
 
-    # 2. Construir los parámetros
+    # Mapbox usa orden (lon,lat) y separa coordenadas con ;
+    coords = f"{lon_origen},{lat_origen};{lon_destino},{lat_destino}"
     params = {
-        "origin": f"{lat_origen},{lon_origen}",
-        "destination": f"{lat_destino},{lon_destino}",
-        "mode": "driving",
-        "key": api_key
+        "access_token": access_token,
+        "overview": "false",       # no necesitamos geometría detallada
+        "geometries": "geojson",
     }
-    
-    # Codificar los parámetros en la URL
     query_string = urllib.parse.urlencode(params)
-    url = f"https://maps.googleapis.com/maps/api/directions/json?{query_string}"
+    url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{coords}?{query_string}"
 
     try:
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=5) as response:
             respuesta_json = json.loads(response.read().decode('utf-8'))
 
-            if respuesta_json.get("status") == "OK":
-                leg = respuesta_json["routes"][0]["legs"][0]
-                return {
-                    "distancia_texto": leg["distance"]["text"],
-                    "distancia_metros": leg["distance"]["value"],
-                    "tiempo_texto": leg["duration"]["text"],
-                    "tiempo_segundos": leg["duration"]["value"]
-                }
-            else:
-                print(f"Error en Google Maps API: {respuesta_json.get('status')}")
+            if respuesta_json.get("code") != "Ok" or not respuesta_json.get("routes"):
+                print(f"Error en Mapbox API: {respuesta_json.get('code')} - {respuesta_json.get('message', '')}")
                 return None
-                
+
+            ruta = respuesta_json["routes"][0]
+            distancia_metros = int(ruta["distance"])
+            tiempo_segundos = int(ruta["duration"])
+
+            # Formato textual similar al que devolvía Google (compatibilidad frontend)
+            if distancia_metros >= 1000:
+                distancia_texto = f"{distancia_metros / 1000:.1f} km"
+            else:
+                distancia_texto = f"{distancia_metros} m"
+
+            minutos = max(1, tiempo_segundos // 60)
+            tiempo_texto = f"{minutos} min"
+
+            return {
+                "distancia_texto": distancia_texto,
+                "distancia_metros": distancia_metros,
+                "tiempo_texto": tiempo_texto,
+                "tiempo_segundos": tiempo_segundos,
+            }
+
     except Exception as e:
-        print(f"Error de conexión con Google Maps: {e}")
+        print(f"Error de conexión con Mapbox: {e}")
         return None
 
 
@@ -385,15 +396,29 @@ def servicio_requerido(event, context):
     """El pasajero solicita un mototaxi.
     Crea el servicio en DynamoDB y notifica a todos los conductores activos.
 
-    Body esperado:
+    El destino acepta dos formas (al menos una es obligatoria, ambas pueden coexistir):
+
+    1) Con coordenadas (el pasajero sabe a dónde va):
     {
       "action": "servicioRequerido",
-      "origen": {"lat": -11.4198, "lng": -75.6896, "direccion": "Plaza de Armas"},
+      "origen":  {"lat": -11.4198, "lng": -75.6896, "direccion": "Plaza de Armas"},
       "destino": {"lat": -11.4150, "lng": -75.6820, "direccion": "Terminal Terrestre"},
       "precioSugerido": 1.00,
       "comentario": "Tengo una maleta",
       "cantidad": 1
     }
+
+    2) Solo referencia textual (el pasajero no conoce el punto exacto):
+    {
+      "action": "servicioRequerido",
+      "origen": {"lat": -11.4198, "lng": -75.6896, "direccion": "Plaza de Armas"},
+      "destinoReferencia": "Cerca al mercado modelo, por la bodega azul",
+      "precioSugerido": 1.00
+    }
+
+    En ambos casos, el destino guardado en DynamoDB incluye `coordenadasExactas`
+    (true/false) para que el frontend del conductor decida si dibujar ruta o solo
+    mostrar el texto de referencia.
     """
     claims = _get_claims(event)
     if not claims:
@@ -410,7 +435,7 @@ def servicio_requerido(event, context):
         or body.get('referenciaDestino')
         or destino_crudo.get('direccion')
         or ''
-    )
+    ).strip()
 
     if not origen_crudo:
         return _ws_error('Se requiere origen')
@@ -418,16 +443,22 @@ def servicio_requerido(event, context):
     if origen_crudo.get('lat') is None or origen_crudo.get('lng') is None:
         return _ws_error('El origen debe incluir lat y lng')
 
-    if not destino_crudo and not destino_referencia:
-        return _ws_error('Se requiere destino o una referencia de destino')
-
-    origen = _coordenadas_a_decimal(origen_crudo)
-
     destino_tiene_coordenadas = (
         destino_crudo.get('lat') is not None and destino_crudo.get('lng') is not None
     )
+
+    if not destino_tiene_coordenadas and len(destino_referencia) < 3:
+        return _ws_error(
+            'Se requiere destino con coordenadas o una referencia de al menos 3 caracteres'
+        )
+
+    origen = _coordenadas_a_decimal(origen_crudo)
+
     if destino_tiene_coordenadas:
         destino = _coordenadas_a_decimal(destino_crudo)
+        if destino_referencia and not destino.get('direccion'):
+            destino['direccion'] = destino_referencia
+        destino['coordenadasExactas'] = True
     else:
         destino = {
             'direccion': destino_referencia,
@@ -510,13 +541,6 @@ def servicio_requerido(event, context):
         'estado': 'PENDIENTE',
         'message': 'Buscando conductor disponible en Tarma...',
     })
-
-    # Enviamos una notficacion a todos los conductores activos usando SNS
-    tablaConductores = dynamodb.Table(CONDUCTORES_TABLE)
-
-    response = tablaConductores.scan(
-        ProjectionExpression='driverId',
-    )
 
     return _ws_ok()
 
